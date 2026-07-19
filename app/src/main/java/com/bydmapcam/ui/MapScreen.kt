@@ -40,7 +40,8 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     val location by LocationBus.location.collectAsState()
     val activeIds by LocationBus.activeAlertIds.collectAsState()
 
-    var showSave by remember { mutableStateOf(false) }
+    // Coordinates for a pending "save point" dialog — from the FAB (current location) or a map long-press.
+    var pendingSave by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var showList by remember { mutableStateOf(false) }
     var editingPoint by remember { mutableStateOf<AlertPoint?>(null) }
     var recenterTick by remember { mutableIntStateOf(0) }
@@ -52,6 +53,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             location = location,
             activeIds = activeIds,
             recenterTick = recenterTick,
+            onMapLongClick = { lat, lng -> pendingSave = lat to lng },
             modifier = Modifier.fillMaxSize()
         )
 
@@ -90,21 +92,22 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             SmallFloatingActionButton(onClick = { showList = true }) {
                 Text("จุด")
             }
-            ExtendedFloatingActionButton(onClick = { if (location != null) showSave = true }) {
+            ExtendedFloatingActionButton(onClick = {
+                location?.let { pendingSave = it.latitude to it.longitude }
+            }) {
                 Text("บันทึกจุดนี้")
             }
         }
     }
 
-    val loc = location
-    if (showSave && loc != null) {
+    pendingSave?.let { (lat, lng) ->
         SavePointDialog(
-            lat = loc.latitude,
-            lng = loc.longitude,
-            onDismiss = { showSave = false },
+            lat = lat,
+            lng = lng,
+            onDismiss = { pendingSave = null },
             onSave = { name, type, radius, alertEnabled, sound ->
-                vm.savePoint(name, type, loc.latitude, loc.longitude, radius, alertEnabled, sound)
-                showSave = false
+                vm.savePoint(name, type, lat, lng, radius, alertEnabled, sound)
+                pendingSave = null
             }
         )
     }

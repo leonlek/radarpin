@@ -48,6 +48,7 @@ fun MapLibreMap(
     location: Location?,
     activeIds: Set<Long>,
     recenterTick: Int,
+    onMapLongClick: (lat: Double, lng: Double) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -84,6 +85,11 @@ fun MapLibreMap(
                     if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
                         followMode = false
                     }
+                }
+                // Long-press anywhere to add a point at that map location.
+                m.addOnMapLongClickListener { latLng ->
+                    onMapLongClick(latLng.latitude, latLng.longitude)
+                    true
                 }
                 m.setStyle(Style.Builder().fromUri(STYLE_URL)) { loaded ->
                     setupLayers(loaded)
