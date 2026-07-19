@@ -20,6 +20,7 @@ import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.LineLayer
@@ -157,17 +158,25 @@ private fun setupLayers(style: Style) {
     style.addSource(GeoJsonSource(SRC_CENTERS))
     style.addLayer(
         CircleLayer("lyr-centers", SRC_CENTERS).withProperties(
-            PropertyFactory.circleColor(android.graphics.Color.parseColor("#0D47A1")),
-            PropertyFactory.circleRadius(5f),
+            // Colour each dot by point type (property "type").
+            PropertyFactory.circleColor(
+                Expression.match(
+                    Expression.get("type"),
+                    Expression.literal("SPEED_CAMERA"), Expression.color(android.graphics.Color.parseColor("#E53935")),
+                    Expression.literal("EV_STATION"), Expression.color(android.graphics.Color.parseColor("#00C853")),
+                    Expression.color(android.graphics.Color.parseColor("#FB8C00")) // POI / default
+                )
+            ),
+            PropertyFactory.circleRadius(6f),
             PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
-            PropertyFactory.circleStrokeWidth(1.5f)
+            PropertyFactory.circleStrokeWidth(1.8f)
         )
     )
 
     style.addSource(GeoJsonSource(SRC_ME))
     style.addLayer(
         CircleLayer("lyr-me", SRC_ME).withProperties(
-            PropertyFactory.circleColor(android.graphics.Color.parseColor("#00C853")),
+            PropertyFactory.circleColor(android.graphics.Color.parseColor("#2962FF")),
             PropertyFactory.circleRadius(7f),
             PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
             PropertyFactory.circleStrokeWidth(2.5f)
@@ -190,7 +199,11 @@ private fun updateSources(
             val poly = Feature.fromGeometry(circlePolygon(p.lat, p.lng, p.radiusM.toDouble()))
             if (p.id in activeIds) active.add(poly) else idle.add(poly)
         }
-        centers.add(Feature.fromGeometry(Point.fromLngLat(p.lng, p.lat)))
+        centers.add(
+            Feature.fromGeometry(Point.fromLngLat(p.lng, p.lat)).apply {
+                addStringProperty("type", p.type.name)
+            }
+        )
     }
     style.getSourceAs<GeoJsonSource>(SRC_IDLE)?.setGeoJson(FeatureCollection.fromFeatures(idle))
     style.getSourceAs<GeoJsonSource>(SRC_ACTIVE)?.setGeoJson(FeatureCollection.fromFeatures(active))
