@@ -23,7 +23,11 @@ import androidx.compose.ui.unit.dp
 import com.bydmapcam.settings.Settings
 
 @Composable
-fun SettingsDialog(onDismiss: () -> Unit) {
+fun SettingsDialog(
+    headingUp: Boolean,
+    onHeadingUpChange: (Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
     val context = LocalContext.current
     var tts by remember { mutableStateOf(Settings.ttsEnabled(context)) }
     var overlay by remember { mutableStateOf(Settings.overlayEnabled(context)) }
@@ -34,6 +38,16 @@ fun SettingsDialog(onDismiss: () -> Unit) {
         title = { Text("ตั้งค่า") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("หมุนแผนที่ตามทิศทางขับ")
+                        Text(
+                            "โหมดขับ: ทิศที่ขับอยู่ด้านบนเสมอ",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Switch(checked = headingUp, onCheckedChange = onHeadingUpChange)
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("เสียงพูดเตือน (TTS)")

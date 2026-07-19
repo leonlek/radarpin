@@ -29,15 +29,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.location.LocationBus
+import com.bydmapcam.settings.Settings
 
 @Composable
 fun MapScreen(vm: MapViewModel = viewModel()) {
+    val context = LocalContext.current
     val points by vm.points.collectAsState()
     val location by LocationBus.location.collectAsState()
     val activeIds by LocationBus.activeAlertIds.collectAsState()
@@ -50,6 +53,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     var showSettings by remember { mutableStateOf(false) }
     var selectedPoint by remember { mutableStateOf<AlertPoint?>(null) }
     var focus by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    var headingUp by remember { mutableStateOf(Settings.headingUp(context)) }
 
     Box(Modifier.fillMaxSize()) {
         MapLibreMap(
@@ -65,6 +69,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 }
             },
             focus = focus,
+            headingUp = headingUp,
             modifier = Modifier.fillMaxSize()
         )
 
@@ -162,7 +167,11 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     }
 
     if (showSettings) {
-        SettingsDialog(onDismiss = { showSettings = false })
+        SettingsDialog(
+            headingUp = headingUp,
+            onHeadingUpChange = { headingUp = it; Settings.setHeadingUp(context, it) },
+            onDismiss = { showSettings = false }
+        )
     }
 }
 

@@ -1,0 +1,12 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="32dp"
+    android:height="32dp"
+    android:viewportWidth="32"
+    android:viewportHeight="32">
+    <!-- soft white disc behind the arrow -->
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.9"
+        android:pathData="M16,4 a12,12 0 1,0 0.01,0 z" />
+    <!-- blue navigation chevron pointing up -->
+    <path android:fillColor="#2962FF" android:strokeColor="#FFFFFF" android:strokeWidth="1.5"
+        android:pathData="M16,6 L25,26 L16,21 L7,26 Z" />
+</vector>

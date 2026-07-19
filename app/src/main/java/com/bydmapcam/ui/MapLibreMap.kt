@@ -21,6 +21,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleEventObserver
 import com.bydmapcam.R
 import com.bydmapcam.data.AlertPoint
+import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
@@ -59,6 +60,7 @@ fun MapLibreMap(
     onMapLongClick: (lat: Double, lng: Double) -> Unit,
     onMarkerClick: (id: Long) -> Unit,
     focus: Pair<Double, Double>?,
+    headingUp: Boolean,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -136,7 +138,25 @@ fun MapLibreMap(
                     m.moveCamera(CameraUpdateFactory.newLatLngZoom(target, 15.0))
                     firstFix = false
                 }
+                followMode && headingUp && loc.hasBearing() -> {
+                    // Heading-up: rotate the map so the driving direction is "up".
+                    val cam = CameraPosition.Builder(m.cameraPosition)
+                        .target(target)
+                        .bearing(loc.bearing.toDouble())
+                        .build()
+                    m.animateCamera(CameraUpdateFactory.newCameraPosition(cam))
+                }
                 followMode -> m.animateCamera(CameraUpdateFactory.newLatLng(target))
+            }
+        }
+    }
+
+    // Snap the map back to north-up when heading-up is turned off.
+    LaunchedEffect(headingUp) {
+        if (!headingUp) {
+            map?.let { m ->
+                val cam = CameraPosition.Builder(m.cameraPosition).bearing(0.0).build()
+                m.animateCamera(CameraUpdateFactory.newCameraPosition(cam))
             }
         }
     }
@@ -221,11 +241,13 @@ private fun setupLayers(style: Style) {
 
     style.addSource(GeoJsonSource(SRC_ME))
     style.addLayer(
-        CircleLayer("lyr-me", SRC_ME).withProperties(
-            PropertyFactory.circleColor(android.graphics.Color.parseColor("#2962FF")),
-            PropertyFactory.circleRadius(7f),
-            PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
-            PropertyFactory.circleStrokeWidth(2.5f)
+        SymbolLayer("lyr-me", SRC_ME).withProperties(
+            PropertyFactory.iconImage("me_arrow"),
+            PropertyFactory.iconAllowOverlap(true),
+            PropertyFactory.iconSize(1.0f),
+            // Rotate the arrow to the driving direction (property "bearing"), relative to the map.
+            PropertyFactory.iconRotate(Expression.get("bearing")),
+            PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP)
         )
     )
 }
@@ -245,6 +267,7 @@ private fun addMarkerImages(style: Style, context: Context) {
     style.addImage("m_camera", drawableToBitmap(context, R.drawable.ic_marker_camera))
     style.addImage("m_poi", drawableToBitmap(context, R.drawable.ic_marker_poi))
     style.addImage("m_ev", drawableToBitmap(context, R.drawable.ic_marker_ev))
+    style.addImage("me_arrow", drawableToBitmap(context, R.drawable.ic_me_arrow))
 }
 
 private fun updateSources(
@@ -274,7 +297,11 @@ private fun updateSources(
     style.getSourceAs<GeoJsonSource>(SRC_ACTIVE)?.setGeoJson(FeatureCollection.fromFeatures(active))
     style.getSourceAs<GeoJsonSource>(SRC_CENTERS)?.setGeoJson(FeatureCollection.fromFeatures(centers))
     location?.let {
-        style.getSourceAs<GeoJsonSource>(SRC_ME)?.setGeoJson(Point.fromLngLat(it.longitude, it.latitude))
+        val bearing = if (it.hasBearing()) it.bearing.toDouble() else 0.0
+        val meFeature = Feature.fromGeometry(Point.fromLngLat(it.longitude, it.latitude)).apply {
+            addNumberProperty("bearing", bearing)
+        }
+        style.getSourceAs<GeoJsonSource>(SRC_ME)?.setGeoJson(meFeature)
     }
 }
 
