@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -15,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -46,6 +48,8 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     var editingPoint by remember { mutableStateOf<AlertPoint?>(null) }
     var recenterTick by remember { mutableIntStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
+    var selectedPoint by remember { mutableStateOf<AlertPoint?>(null) }
+    var focus by remember { mutableStateOf<Pair<Double, Double>?>(null) }
 
     Box(Modifier.fillMaxSize()) {
         MapLibreMap(
@@ -54,6 +58,13 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             activeIds = activeIds,
             recenterTick = recenterTick,
             onMapLongClick = { lat, lng -> pendingSave = lat to lng },
+            onMarkerClick = { id ->
+                points.find { it.id == id }?.let {
+                    selectedPoint = it
+                    focus = it.lat to it.lng
+                }
+            },
+            focus = focus,
             modifier = Modifier.fillMaxSize()
         )
 
@@ -98,6 +109,19 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 Text("บันทึกจุดนี้")
             }
         }
+
+        selectedPoint?.let { p ->
+            PointInfoCard(
+                point = p,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(12.dp),
+                onEdit = { editingPoint = p; selectedPoint = null },
+                onDelete = { vm.delete(p); selectedPoint = null },
+                onClose = { selectedPoint = null }
+            )
+        }
     }
 
     pendingSave?.let { (lat, lng) ->
@@ -116,6 +140,11 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         PointListDialog(
             points = points,
             onDismiss = { showList = false },
+            onFocus = { p ->
+                showList = false
+                selectedPoint = p
+                focus = p.lat to p.lng
+            },
             onEdit = { editingPoint = it },
             onDelete = { vm.delete(it) }
         )
@@ -172,6 +201,45 @@ private fun AlertBanner(points: List<AlertPoint>, modifier: Modifier = Modifier)
             )
             points.take(3).forEach {
                 Text(text = "• ${it.name} (${it.type.label})", color = Color.White)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PointInfoCard(
+    point: AlertPoint,
+    modifier: Modifier = Modifier,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onClose: () -> Unit
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 8.dp
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(point.name, style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = if (point.alertEnabled) {
+                    "${point.type.label} • เตือน ${point.radiusM} ม. • ${if (point.alertSound) "เสียง" else "เงียบ"}"
+                } else {
+                    "${point.type.label} • ไม่เตือน"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "พิกัด: ${"%.5f".format(point.lat)}, ${"%.5f".format(point.lng)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onEdit) { Text("แก้ไข") }
+                TextButton(onClick = onDelete) { Text("ลบ") }
+                TextButton(onClick = onClose) { Text("ปิด") }
             }
         }
     }

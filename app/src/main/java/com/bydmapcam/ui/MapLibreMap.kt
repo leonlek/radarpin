@@ -1,5 +1,9 @@
 package com.bydmapcam.ui
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.RectF
 import android.location.Location
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -13,7 +17,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleEventObserver
+import com.bydmapcam.R
 import com.bydmapcam.data.AlertPoint
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
@@ -24,7 +30,9 @@ import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
+import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
@@ -49,6 +57,8 @@ fun MapLibreMap(
     activeIds: Set<Long>,
     recenterTick: Int,
     onMapLongClick: (lat: Double, lng: Double) -> Unit,
+    onMarkerClick: (id: Long) -> Unit,
+    focus: Pair<Double, Double>?,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -91,7 +101,21 @@ fun MapLibreMap(
                     onMapLongClick(latLng.latitude, latLng.longitude)
                     true
                 }
+                // Tap a marker to focus it + show info.
+                m.addOnMapClickListener { latLng ->
+                    val screen = m.projection.toScreenLocation(latLng)
+                    val box = RectF(screen.x - 22f, screen.y - 22f, screen.x + 22f, screen.y + 22f)
+                    val hitId = m.queryRenderedFeatures(box, "lyr-markers")
+                        .firstOrNull()?.getNumberProperty("id")?.toLong()
+                    if (hitId != null) {
+                        onMarkerClick(hitId)
+                        true
+                    } else {
+                        false
+                    }
+                }
                 m.setStyle(Style.Builder().fromUri(STYLE_URL)) { loaded ->
+                    addMarkerImages(loaded, context)
                     setupLayers(loaded)
                     style = loaded
                 }
@@ -130,6 +154,13 @@ fun MapLibreMap(
             }
         }
     }
+
+    // Focus a specific saved point (from a marker tap or the list).
+    LaunchedEffect(focus) {
+        val f = focus ?: return@LaunchedEffect
+        followMode = false
+        map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(f.first, f.second), 16.5))
+    }
 }
 
 private fun setupLayers(style: Style) {
@@ -163,19 +194,28 @@ private fun setupLayers(style: Style) {
 
     style.addSource(GeoJsonSource(SRC_CENTERS))
     style.addLayer(
-        CircleLayer("lyr-centers", SRC_CENTERS).withProperties(
-            // Colour each dot by point type (property "type").
-            PropertyFactory.circleColor(
+        SymbolLayer("lyr-markers", SRC_CENTERS).withProperties(
+            // Icon by type (m_camera / m_ev / m_poi), with the point name as a label below it.
+            PropertyFactory.iconImage(
                 Expression.match(
                     Expression.get("type"),
-                    Expression.literal("SPEED_CAMERA"), Expression.color(android.graphics.Color.parseColor("#E53935")),
-                    Expression.literal("EV_STATION"), Expression.color(android.graphics.Color.parseColor("#00C853")),
-                    Expression.color(android.graphics.Color.parseColor("#FB8C00")) // POI / default
+                    Expression.literal("SPEED_CAMERA"), Expression.literal("m_camera"),
+                    Expression.literal("EV_STATION"), Expression.literal("m_ev"),
+                    Expression.literal("m_poi") // POI / default
                 )
             ),
-            PropertyFactory.circleRadius(6f),
-            PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
-            PropertyFactory.circleStrokeWidth(1.8f)
+            PropertyFactory.iconAllowOverlap(true),
+            PropertyFactory.iconSize(0.9f),
+            PropertyFactory.textField(Expression.get("name")),
+            PropertyFactory.textFont(arrayOf("Noto Sans Regular")),
+            PropertyFactory.textSize(11f),
+            PropertyFactory.textColor(android.graphics.Color.parseColor("#212121")),
+            PropertyFactory.textHaloColor(android.graphics.Color.WHITE),
+            PropertyFactory.textHaloWidth(1.6f),
+            PropertyFactory.textAnchor(Property.TEXT_ANCHOR_TOP),
+            PropertyFactory.textOffset(arrayOf(0f, 1.1f)),
+            PropertyFactory.textOptional(true),
+            PropertyFactory.textAllowOverlap(false)
         )
     )
 
@@ -188,6 +228,23 @@ private fun setupLayers(style: Style) {
             PropertyFactory.circleStrokeWidth(2.5f)
         )
     )
+}
+
+private fun drawableToBitmap(context: Context, resId: Int): Bitmap {
+    val drawable = ContextCompat.getDrawable(context, resId)!!
+    val w = drawable.intrinsicWidth.coerceAtLeast(1)
+    val h = drawable.intrinsicHeight.coerceAtLeast(1)
+    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    drawable.setBounds(0, 0, w, h)
+    drawable.draw(canvas)
+    return bitmap
+}
+
+private fun addMarkerImages(style: Style, context: Context) {
+    style.addImage("m_camera", drawableToBitmap(context, R.drawable.ic_marker_camera))
+    style.addImage("m_poi", drawableToBitmap(context, R.drawable.ic_marker_poi))
+    style.addImage("m_ev", drawableToBitmap(context, R.drawable.ic_marker_ev))
 }
 
 private fun updateSources(
@@ -208,6 +265,8 @@ private fun updateSources(
         centers.add(
             Feature.fromGeometry(Point.fromLngLat(p.lng, p.lat)).apply {
                 addStringProperty("type", p.type.name)
+                addStringProperty("name", p.name)
+                addNumberProperty("id", p.id)
             }
         )
     }

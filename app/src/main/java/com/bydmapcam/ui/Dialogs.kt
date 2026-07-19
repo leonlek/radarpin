@@ -2,6 +2,7 @@
 
 package com.bydmapcam.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -172,6 +173,7 @@ fun EditPointDialog(
 fun PointListDialog(
     points: List<AlertPoint>,
     onDismiss: () -> Unit,
+    onFocus: (AlertPoint) -> Unit,
     onEdit: (AlertPoint) -> Unit,
     onDelete: (AlertPoint) -> Unit
 ) {
@@ -189,7 +191,11 @@ fun PointListDialog(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(vertical = 4.dp)
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { onFocus(p) }
+                            ) {
                                 Text(p.name, style = MaterialTheme.typography.bodyLarge)
                                 Text(
                                     text = pointDetail(p),
