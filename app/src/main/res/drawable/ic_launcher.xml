@@ -1,0 +1,37 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Rounded-square background with a blue -> cyan diagonal gradient -->
+    <path android:pathData="M24,4 L84,4 A20,20 0 0 1 104,24 L104,84 A20,20 0 0 1 84,104 L24,104 A20,20 0 0 1 4,84 L4,24 A20,20 0 0 1 24,4 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="10" android:startY="8"
+                android:endX="98" android:endY="104">
+                <item android:offset="0" android:color="#FF0B3D91" />
+                <item android:offset="0.55" android:color="#FF1666C7" />
+                <item android:offset="1" android:color="#FF15C2FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Soft radar sweep arcs in the background (subtle white) -->
+    <path android:strokeColor="#33FFFFFF" android:strokeWidth="2.5" android:fillColor="#00000000"
+        android:pathData="M78,30 A34,34 0 0 1 82,74" />
+    <path android:strokeColor="#22FFFFFF" android:strokeWidth="2.5" android:fillColor="#00000000"
+        android:pathData="M88,24 A46,46 0 0 1 92,84" />
+
+    <!-- White map pin -->
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M52,20 C38,20 27,31 27,45 C27,64 52,90 52,90 C52,90 77,64 77,45 C77,31 66,20 52,20 Z" />
+
+    <!-- Red radar target inside the pin: ring + center dot -->
+    <path android:strokeColor="#FFE53935" android:strokeWidth="3" android:fillColor="#00000000"
+        android:pathData="M52,33 a12,12 0 1,0 0.01,0 z" />
+    <path android:fillColor="#FFE53935"
+        android:pathData="M52,39 a6,6 0 1,0 0.01,0 z" />
+</vector>

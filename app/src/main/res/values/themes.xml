@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.BydMapCam" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#0D47A1</item>
+        <item name="android:windowBackground">#FFFFFF</item>
+    </style>
+</resources>

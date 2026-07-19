@@ -1,0 +1,279 @@
+package com.bydmapcam.location
+
+import android.Manifest
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Build
+import android.os.Bundle
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.LifecycleService
+import androidx.lifecycle.lifecycleScope
+import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
+import android.widget.LinearLayout
+import android.widget.TextView
+import com.bydmapcam.MainActivity
+import com.bydmapcam.R
+import com.bydmapcam.alert.Beeper
+import com.bydmapcam.alert.Speaker
+import com.bydmapcam.data.AlertPoint
+import com.bydmapcam.data.PointRepository
+import com.bydmapcam.settings.Settings
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+
+/** Foreground service that tracks GPS and beeps when the car enters a saved point's radius. */
+class LocationService : LifecycleService(), LocationListener {
+
+    private lateinit var locationManager: LocationManager
+    private lateinit var repository: PointRepository
+
+    @Volatile
+    private var points: List<AlertPoint> = emptyList()
+    private var insideIds: Set<Long> = emptySet()
+    private var lastLocation: Location? = null
+    private var overlayView: View? = null
+    private var overlayLabel: TextView? = null
+    private var overlayDismissedFor: Set<Long> = emptySet()
+
+    override fun onCreate() {
+        super.onCreate()
+        repository = PointRepository(this)
+        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+
+        repository.observeAll()
+            .onEach { points = it; recompute() }
+            .launchIn(lifecycleScope)
+
+        // Show/hide the over-other-apps overlay as our own UI comes and goes.
+        AppState.inForeground
+            .onEach { updateOverlay() }
+            .launchIn(lifecycleScope)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        super.onStartCommand(intent, flags, startId)
+        startAsForeground()
+        requestUpdates()
+        return START_STICKY
+    }
+
+    private fun startAsForeground() {
+        val notification = buildNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        } else {
+            startForeground(NOTIF_ID, notification)
+        }
+    }
+
+    private fun requestUpdates() {
+        val hasFine = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!hasFine && !hasCoarse) return
+
+        val provider = when {
+            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
+            else -> LocationManager.NETWORK_PROVIDER
+        }
+        try {
+            // minDistance = 0: fire every ~1s even when stationary, so alerts stay live in a parked/idling car.
+            locationManager.requestLocationUpdates(provider, 1000L, 0f, this)
+            locationManager.getLastKnownLocation(provider)?.let { onLocationChanged(it) }
+        } catch (_: SecurityException) {
+        } catch (_: IllegalArgumentException) {
+        }
+    }
+
+    override fun onLocationChanged(location: Location) {
+        lastLocation = location
+        LocationBus.updateLocation(location)
+        recompute()
+    }
+
+    /** Re-evaluate which points the car is inside. Runs on every GPS tick AND whenever the
+     *  saved-points list changes, so an alert fires immediately (e.g. right after saving). */
+    private fun recompute() {
+        val loc = lastLocation ?: return
+        val nowInside = mutableSetOf<Long>()
+        for (p in points) {
+            if (!p.alertEnabled) continue // points marked "no alert" are shown on the map but never warn
+            val d = GeoUtils.distanceMeters(loc.latitude, loc.longitude, p.lat, p.lng)
+            if (d <= p.radiusM) {
+                nowInside.add(p.id)
+                // Fire only on the transition from outside -> inside.
+                if (p.id !in insideIds && p.alertSound) {
+                    Beeper.beep()
+                    if (Settings.ttsEnabled(this)) {
+                        Speaker.speak("${p.type.label}ข้างหน้า ${p.radiusM} เมตร")
+                    }
+                }
+            }
+        }
+        insideIds = nowInside
+        LocationBus.updateActiveAlerts(nowInside)
+        updateOverlay()
+    }
+
+    /** Floating red banner drawn over other apps while backgrounded and inside an alert. */
+    private fun updateOverlay() {
+        val active = insideIds
+        if (active.isEmpty()) overlayDismissedFor = emptySet()
+        val show = Settings.overlayEnabled(this) &&
+            Settings.canDrawOverlays(this) &&
+            active.isNotEmpty() &&
+            !AppState.inForeground.value &&
+            active != overlayDismissedFor
+        if (!show) {
+            hideOverlay()
+            return
+        }
+        val names = points.filter { it.id in active }
+            .take(3)
+            .joinToString("\n") { "• ${it.name} (${it.type.label})" }
+        showOverlay("⚠ ใกล้จุดเตือน — แตะเพื่อเปิดแอป\n$names")
+    }
+
+    private fun openApp() {
+        runCatching {
+            startActivity(
+                Intent(this, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            )
+        }
+    }
+
+    /** Hide the banner for the current alert without opening the app. */
+    private fun dismissOverlay() {
+        overlayDismissedFor = insideIds
+        hideOverlay()
+    }
+
+    private fun showOverlay(message: String) {
+        val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val density = resources.displayMetrics.density
+        fun dp(value: Int) = (value * density).toInt()
+        if (overlayView == null) {
+            val label = TextView(this).apply {
+                setTextColor(0xFFFFFFFF.toInt())
+                textSize = 16f
+                // Cap the width so it stays a compact card instead of a full-screen bar
+                // (matters most on the car's wide landscape screen).
+                maxWidth = dp(340)
+                setOnClickListener { openApp() }
+            }
+            val dismiss = TextView(this).apply {
+                text = "✕"
+                setTextColor(0xFFFFFFFF.toInt())
+                textSize = 20f
+                setPadding(dp(14), dp(2), dp(6), dp(2))
+                setOnClickListener { dismissOverlay() }
+            }
+            val root = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(18), dp(12), dp(12), dp(12))
+                background = GradientDrawable().apply {
+                    setColor(0xF0E53935.toInt())
+                    cornerRadius = dp(18).toFloat()
+                }
+                addView(label, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                addView(dismiss, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            }
+            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else {
+                @Suppress("DEPRECATION")
+                WindowManager.LayoutParams.TYPE_PHONE
+            }
+            val lp = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                type,
+                // Touchable card (tap = open, ✕ = dismiss); touches outside it pass to the app behind.
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                y = dp(24)
+            }
+            overlayView = root
+            overlayLabel = label
+            runCatching { wm.addView(root, lp) }
+        }
+        overlayLabel?.text = message
+    }
+
+    private fun hideOverlay() {
+        val v = overlayView ?: return
+        overlayView = null
+        overlayLabel = null
+        runCatching { (getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(v) }
+    }
+
+    override fun onProviderEnabled(provider: String) {}
+    override fun onProviderDisabled(provider: String) {}
+
+    @Deprecated("Deprecated in Java")
+    override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+
+    override fun onDestroy() {
+        runCatching { locationManager.removeUpdates(this) }
+        hideOverlay()
+        super.onDestroy()
+    }
+
+    private fun buildNotification(): Notification {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val mgr = getSystemService(NotificationManager::class.java)
+            if (mgr.getNotificationChannel(CHANNEL_ID) == null) {
+                mgr.createNotificationChannel(
+                    NotificationChannel(CHANNEL_ID, "ตำแหน่ง", NotificationManager.IMPORTANCE_LOW)
+                )
+            }
+        }
+        val pi = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("RadarPin")
+            .setContentText("กำลังเฝ้าเตือนจุดที่บันทึกไว้")
+            .setSmallIcon(R.drawable.ic_launcher)
+            .setContentIntent(pi)
+            .setOngoing(true)
+            .build()
+    }
+
+    companion object {
+        private const val NOTIF_ID = 1001
+        private const val CHANNEL_ID = "location"
+
+        fun start(context: Context) {
+            ContextCompat.startForegroundService(context, Intent(context, LocationService::class.java))
+        }
+
+        fun stop(context: Context) {
+            context.stopService(Intent(context, LocationService::class.java))
+        }
+    }
+}
