@@ -45,8 +45,6 @@ class LocationService : LifecycleService(), LocationListener {
     @Volatile
     private var points: List<AlertPoint> = emptyList()
     private var insideIds: Set<Long> = emptySet()
-    // Per-point proximity tier already announced (0=far, 1=near, 2=imminent); rearms on exit.
-    private val beepTier: MutableMap<Long, Int> = mutableMapOf()
     private var lastLocation: Location? = null
     private var overlayView: View? = null
     private var overlayLabel: TextView? = null
@@ -139,47 +137,26 @@ class LocationService : LifecycleService(), LocationListener {
             if (directionAware && moving) {
                 val bearingToPoint = GeoUtils.bearingDeg(loc.latitude, loc.longitude, p.lat, p.lng)
                 val off = GeoUtils.angleDiffDeg(loc.bearing.toDouble(), bearingToPoint)
-                if (off > AWAY_ANGLE_DEG) {
-                    beepTier.remove(p.id) // rearm so a genuine re-approach beeps again
-                    continue
-                }
+                if (off > AWAY_ANGLE_DEG) continue
             }
 
             nowInside.add(p.id)
             distances[p.id] = d.toInt()
 
-            // Escalating alert: beep more as the tier rises (0 -> 1 -> 2 while distance shrinks).
-            if (p.alertSound) {
-                val tier = tierFor(d)
-                val prev = beepTier[p.id] ?: -1
-                if (tier > prev) {
-                    Beeper.beep(count = tier + 1)
-                    if (Settings.ttsEnabled(this)) Speaker.speak(ttsFor(p, d, tier))
+            // Beep once on the outside -> inside transition (single beep, no escalation).
+            if (p.id !in insideIds && p.alertSound) {
+                Beeper.beep()
+                if (Settings.ttsEnabled(this)) {
+                    Speaker.speak("${p.type.label}ข้างหน้า ${roundDist(d)} เมตร")
                 }
-                beepTier[p.id] = tier
             }
         }
-        // Forget tiers for points we've left, so the next approach re-arms the escalation.
-        beepTier.keys.retainAll(nowInside)
 
         insideIds = nowInside
         LocationBus.updateActiveAlerts(nowInside)
         LocationBus.updateInfoActive(nowInfo)
         LocationBus.updateAlertDistances(distances)
         updateOverlay()
-    }
-
-    /** Proximity tier: 0 = far (just entered), 1 = near, 2 = imminent (right on top of it). */
-    private fun tierFor(d: Double): Int = when {
-        d <= IMMINENT_M -> 2
-        d <= NEAR_M -> 1
-        else -> 0
-    }
-
-    private fun ttsFor(p: AlertPoint, d: Double, tier: Int): String = when (tier) {
-        2 -> "ระวัง ${p.type.label}"
-        1 -> "${p.type.label} อีก ${roundDist(d)} เมตร"
-        else -> "${p.type.label}ข้างหน้า ${roundDist(d)} เมตร"
     }
 
     /** Round to a spoken-friendly distance (100s far out, 50s mid, 10s close). */
@@ -330,8 +307,6 @@ class LocationService : LifecycleService(), LocationListener {
         private const val INFO_DISTANCE_M = 100.0
         private const val MOVING_SPEED_MPS = 2.5f  // ~9 km/h; below this, heading is unreliable
         private const val AWAY_ANGLE_DEG = 115.0   // point is behind us -> driving away -> suppress
-        private const val NEAR_M = 150.0
-        private const val IMMINENT_M = 60.0
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, LocationService::class.java))
