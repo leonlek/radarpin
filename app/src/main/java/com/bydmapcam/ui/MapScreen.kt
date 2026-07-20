@@ -1,5 +1,6 @@
 package com.bydmapcam.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -196,6 +197,13 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         SettingsDialog(
             headingUp = headingUp,
             onHeadingUpChange = { headingUp = it; Settings.setHeadingUp(context, it) },
+            onImportCameras = {
+                Toast.makeText(context, "กำลังนำเข้าฐานกล้อง…", Toast.LENGTH_SHORT).show()
+                vm.importCameras { count ->
+                    Toast.makeText(context, "นำเข้าเสร็จ — เพิ่ม $count จุด", Toast.LENGTH_LONG).show()
+                }
+                showSettings = false
+            },
             onDismiss = { showSettings = false }
         )
     }

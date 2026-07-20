@@ -1,0 +1,293 @@
+{
+ "version": 1,
+ "source": "OpenStreetMap (ODbL)",
+ "count": 26,
+ "points": [
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 19.108532,
+   "lng": 99.454779,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 18.878476,
+   "lng": 99.142734,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 18.295203,
+   "lng": 98.643058,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 19.014042,
+   "lng": 98.944508,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 16.981123,
+   "lng": 100.330722,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 13.934265,
+   "lng": 101.695622,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 13.934049,
+   "lng": 101.69563,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 19.072092,
+   "lng": 99.388831,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 19.834455,
+   "lng": 99.784634,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 19.834322,
+   "lng": 99.784743,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 19.040123,
+   "lng": 99.335275,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 17.061738,
+   "lng": 100.312353,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว (จำกัด 80)",
+   "type": "SPEED_CAMERA",
+   "lat": 18.539792,
+   "lng": 99.068671,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 12.002485,
+   "lng": 99.833558,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 12.002493,
+   "lng": 99.833402,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 19.056574,
+   "lng": 99.357302,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 18.246584,
+   "lng": 100.223829,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 17.542172,
+   "lng": 100.194756,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 17.540115,
+   "lng": 100.198011,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 19.01808,
+   "lng": 99.306968,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 16.394665,
+   "lng": 102.813131,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 16.394682,
+   "lng": 102.812889,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว (จำกัด 60)",
+   "type": "SPEED_CAMERA",
+   "lat": 19.311097,
+   "lng": 99.511775,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว (จำกัด 100)",
+   "type": "SPEED_CAMERA",
+   "lat": 17.216033,
+   "lng": 99.122966,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว",
+   "type": "SPEED_CAMERA",
+   "lat": 15.960894,
+   "lng": 99.842382,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  },
+  {
+   "name": "กล้องจับความเร็ว (จำกัด 90)",
+   "type": "SPEED_CAMERA",
+   "lat": 15.889769,
+   "lng": 99.900582,
+   "radiusM": 300,
+   "alertEnabled": true,
+   "alertSound": true,
+   "infoMode": false,
+   "createdAt": 0
+  }
+ ]
+}

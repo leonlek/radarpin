@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -26,6 +27,7 @@ import com.bydmapcam.settings.Settings
 fun SettingsDialog(
     headingUp: Boolean,
     onHeadingUpChange: (Boolean) -> Unit,
+    onImportCameras: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -38,24 +40,16 @@ fun SettingsDialog(
         title = { Text("ตั้งค่า") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("หมุนแผนที่ตามทิศทางขับ")
-                        Text(
-                            "โหมดขับ: ทิศที่ขับอยู่ด้านบนเสมอ",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
+                SettingRow(
+                    title = "หมุนแผนที่ตามทิศทางขับ",
+                    subtitle = "โหมดขับ: ทิศที่ขับอยู่ด้านบนเสมอ"
+                ) {
                     Switch(checked = headingUp, onCheckedChange = onHeadingUpChange)
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("เสียงพูดเตือน (TTS)")
-                        Text(
-                            "พูดชื่อจุดตอนเข้าใกล้",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
+                SettingRow(
+                    title = "เสียงพูดเตือน (TTS)",
+                    subtitle = "พูดชื่อจุดตอนเข้าใกล้"
+                ) {
                     Switch(
                         checked = tts,
                         onCheckedChange = {
@@ -64,14 +58,10 @@ fun SettingsDialog(
                         }
                     )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("แบนเนอร์ทับแอปอื่น")
-                        Text(
-                            "เด้งเตือนแม้เปิดแอปอื่น (ต้องอนุญาต \"แสดงทับแอปอื่น\")",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
+                SettingRow(
+                    title = "แบนเนอร์ทับแอปอื่น",
+                    subtitle = "เด้งเตือนแม้เปิดแอปอื่น (ต้องอนุญาต \"แสดงทับแอปอื่น\")"
+                ) {
                     Switch(
                         checked = overlay,
                         onCheckedChange = { checked ->
@@ -90,7 +80,29 @@ fun SettingsDialog(
                         }
                     )
                 }
+                HorizontalDivider()
+                SettingRow(
+                    title = "นำเข้าฐานกล้องทั่วไทย",
+                    subtitle = "ดึงกล้องจับความเร็ว (OpenStreetMap) เพิ่มลงแผนที่"
+                ) {
+                    TextButton(onClick = onImportCameras) { Text("นำเข้า") }
+                }
             }
         }
     )
+}
+
+@Composable
+private fun SettingRow(
+    title: String,
+    subtitle: String,
+    control: @Composable () -> Unit
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall)
+        }
+        control()
+    }
 }
