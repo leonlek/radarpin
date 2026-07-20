@@ -17,6 +17,10 @@ object LocationBus {
     private val _infoActiveIds = MutableStateFlow<Set<Long>>(emptySet())
     val infoActiveIds: StateFlow<Set<Long>> = _infoActiveIds
 
+    /** Live distance (meters, rounded) to each currently-active alert point, for the countdown display. */
+    private val _alertDistances = MutableStateFlow<Map<Long, Int>>(emptyMap())
+    val alertDistances: StateFlow<Map<Long, Int>> = _alertDistances
+
     fun updateLocation(loc: Location) {
         _location.value = loc
     }
@@ -27,5 +31,9 @@ object LocationBus {
 
     fun updateInfoActive(ids: Set<Long>) {
         _infoActiveIds.value = ids
+    }
+
+    fun updateAlertDistances(distances: Map<Long, Int>) {
+        _alertDistances.value = distances
     }
 }

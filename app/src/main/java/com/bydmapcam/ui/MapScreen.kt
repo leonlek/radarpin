@@ -50,6 +50,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     val location by LocationBus.location.collectAsState()
     val activeIds by LocationBus.activeAlertIds.collectAsState()
     val infoActiveIds by LocationBus.infoActiveIds.collectAsState()
+    val alertDistances by LocationBus.alertDistances.collectAsState()
 
     // Coordinates for a pending "save point" dialog — from the FAB (current location) or a map long-press.
     var pendingSave by remember { mutableStateOf<Pair<Double, Double>?>(null) }
@@ -99,6 +100,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             if (activePoints.isNotEmpty() && activeIds != bannerDismissed) {
                 AlertBanner(
                     points = activePoints,
+                    distances = alertDistances,
                     onDismiss = { bannerDismissed = activeIds },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -234,9 +236,12 @@ private fun SpeedChip(speedMps: Float, modifier: Modifier = Modifier) {
 @Composable
 private fun AlertBanner(
     points: List<AlertPoint>,
+    distances: Map<Long, Int>,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Highlight the nearest point's distance big in the header (live countdown).
+    val nearest = points.mapNotNull { distances[it.id] }.minOrNull()
     Surface(
         modifier = modifier,
         color = Color(0xFFE53935),
@@ -250,12 +255,14 @@ private fun AlertBanner(
                     .padding(start = 20.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)
             ) {
                 Text(
-                    text = "⚠ ใกล้จุดเตือน",
+                    text = if (nearest != null) "⚠ ใกล้จุดเตือน — อีก $nearest ม." else "⚠ ใกล้จุดเตือน",
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
                 )
                 points.take(3).forEach {
-                    Text(text = "• ${it.name} (${it.type.label})", color = Color.White)
+                    val dm = distances[it.id]
+                    val tail = if (dm != null) " — $dm ม." else " (${it.type.label})"
+                    Text(text = "• ${it.name}$tail", color = Color.White)
                 }
             }
             TextButton(onClick = onDismiss) {

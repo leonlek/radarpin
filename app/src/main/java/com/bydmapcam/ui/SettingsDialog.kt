@@ -33,6 +33,7 @@ fun SettingsDialog(
     val context = LocalContext.current
     var tts by remember { mutableStateOf(Settings.ttsEnabled(context)) }
     var overlay by remember { mutableStateOf(Settings.overlayEnabled(context)) }
+    var directionAware by remember { mutableStateOf(Settings.directionAware(context)) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -45,6 +46,18 @@ fun SettingsDialog(
                     subtitle = "โหมดขับ: ทิศที่ขับอยู่ด้านบนเสมอ"
                 ) {
                     Switch(checked = headingUp, onCheckedChange = onHeadingUpChange)
+                }
+                SettingRow(
+                    title = "เตือนเฉพาะทิศเข้าหา",
+                    subtitle = "ไม่เตือนจุดที่ขับเลยผ่านไปแล้ว/สวนทาง (ตอนจอดเตือนทุกจุด)"
+                ) {
+                    Switch(
+                        checked = directionAware,
+                        onCheckedChange = {
+                            directionAware = it
+                            Settings.setDirectionAware(context, it)
+                        }
+                    )
                 }
                 SettingRow(
                     title = "เสียงพูดเตือน (TTS)",

@@ -45,6 +45,8 @@ class LocationService : LifecycleService(), LocationListener {
     @Volatile
     private var points: List<AlertPoint> = emptyList()
     private var insideIds: Set<Long> = emptySet()
+    // Per-point proximity tier already announced (0=far, 1=near, 2=imminent); rearms on exit.
+    private val beepTier: MutableMap<Long, Int> = mutableMapOf()
     private var lastLocation: Location? = null
     private var overlayView: View? = null
     private var overlayLabel: TextView? = null
@@ -115,27 +117,76 @@ class LocationService : LifecycleService(), LocationListener {
         val loc = lastLocation ?: return
         val nowInside = mutableSetOf<Long>()
         val nowInfo = mutableSetOf<Long>()
+        val distances = mutableMapOf<Long, Int>()
+
+        // Heading is only trustworthy while genuinely moving; when parked/idling we can't tell
+        // which way we face, so we skip the direction filter and alert regardless.
+        val moving = loc.hasBearing() && loc.hasSpeed() && loc.speed >= MOVING_SPEED_MPS
+        val directionAware = Settings.directionAware(this)
+
         for (p in points) {
             if (!p.alertEnabled) continue // points marked "no alert" are shown on the map but never warn
             val d = GeoUtils.distanceMeters(loc.latitude, loc.longitude, p.lat, p.lng)
             if (p.infoMode) {
                 // INFO: no beep/banner — just pops the icon up within ~100 m.
                 if (d <= INFO_DISTANCE_M) nowInfo.add(p.id)
-            } else if (d <= p.radiusM) {
-                nowInside.add(p.id)
-                // Fire only on the transition from outside -> inside.
-                if (p.id !in insideIds && p.alertSound) {
-                    Beeper.beep()
-                    if (Settings.ttsEnabled(this)) {
-                        Speaker.speak("${p.type.label}ข้างหน้า ${p.radiusM} เมตร")
-                    }
+                continue
+            }
+            if (d > p.radiusM) continue
+
+            // Direction filter: suppress points we're clearly driving AWAY from (behind us —
+            // already passed, or travelling the opposite way). Only applies while moving.
+            if (directionAware && moving) {
+                val bearingToPoint = GeoUtils.bearingDeg(loc.latitude, loc.longitude, p.lat, p.lng)
+                val off = GeoUtils.angleDiffDeg(loc.bearing.toDouble(), bearingToPoint)
+                if (off > AWAY_ANGLE_DEG) {
+                    beepTier.remove(p.id) // rearm so a genuine re-approach beeps again
+                    continue
                 }
             }
+
+            nowInside.add(p.id)
+            distances[p.id] = d.toInt()
+
+            // Escalating alert: beep more as the tier rises (0 -> 1 -> 2 while distance shrinks).
+            if (p.alertSound) {
+                val tier = tierFor(d)
+                val prev = beepTier[p.id] ?: -1
+                if (tier > prev) {
+                    Beeper.beep(count = tier + 1)
+                    if (Settings.ttsEnabled(this)) Speaker.speak(ttsFor(p, d, tier))
+                }
+                beepTier[p.id] = tier
+            }
         }
+        // Forget tiers for points we've left, so the next approach re-arms the escalation.
+        beepTier.keys.retainAll(nowInside)
+
         insideIds = nowInside
         LocationBus.updateActiveAlerts(nowInside)
         LocationBus.updateInfoActive(nowInfo)
+        LocationBus.updateAlertDistances(distances)
         updateOverlay()
+    }
+
+    /** Proximity tier: 0 = far (just entered), 1 = near, 2 = imminent (right on top of it). */
+    private fun tierFor(d: Double): Int = when {
+        d <= IMMINENT_M -> 2
+        d <= NEAR_M -> 1
+        else -> 0
+    }
+
+    private fun ttsFor(p: AlertPoint, d: Double, tier: Int): String = when (tier) {
+        2 -> "ระวัง ${p.type.label}"
+        1 -> "${p.type.label} อีก ${roundDist(d)} เมตร"
+        else -> "${p.type.label}ข้างหน้า ${roundDist(d)} เมตร"
+    }
+
+    /** Round to a spoken-friendly distance (100s far out, 50s mid, 10s close). */
+    private fun roundDist(d: Double): Int = when {
+        d >= 300 -> (d / 100).toInt() * 100
+        d >= 100 -> (d / 50).toInt() * 50
+        else -> ((d / 10).toInt() * 10).coerceAtLeast(10)
     }
 
     /** Floating red banner drawn over other apps while backgrounded and inside an alert. */
@@ -151,9 +202,13 @@ class LocationService : LifecycleService(), LocationListener {
             hideOverlay()
             return
         }
+        val dist = LocationBus.alertDistances.value
         val names = points.filter { it.id in active }
             .take(3)
-            .joinToString("\n") { "• ${it.name} (${it.type.label})" }
+            .joinToString("\n") { p ->
+                val dm = dist[p.id]
+                if (dm != null) "• ${p.name} — อีก $dm ม." else "• ${p.name} (${p.type.label})"
+            }
         showOverlay("⚠ ใกล้จุดเตือน — แตะเพื่อเปิดแอป\n$names")
     }
 
@@ -273,6 +328,10 @@ class LocationService : LifecycleService(), LocationListener {
         private const val NOTIF_ID = 1001
         private const val CHANNEL_ID = "location"
         private const val INFO_DISTANCE_M = 100.0
+        private const val MOVING_SPEED_MPS = 2.5f  // ~9 km/h; below this, heading is unreliable
+        private const val AWAY_ANGLE_DEG = 115.0   // point is behind us -> driving away -> suppress
+        private const val NEAR_M = 150.0
+        private const val IMMINENT_M = 60.0
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, LocationService::class.java))
