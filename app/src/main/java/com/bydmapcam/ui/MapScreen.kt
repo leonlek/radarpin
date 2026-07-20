@@ -48,6 +48,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     val points by vm.points.collectAsState()
     val location by LocationBus.location.collectAsState()
     val activeIds by LocationBus.activeAlertIds.collectAsState()
+    val infoActiveIds by LocationBus.infoActiveIds.collectAsState()
 
     // Coordinates for a pending "save point" dialog — from the FAB (current location) or a map long-press.
     var pendingSave by remember { mutableStateOf<Pair<Double, Double>?>(null) }
@@ -68,6 +69,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             points = points,
             location = location,
             activeIds = activeIds,
+            infoActiveIds = infoActiveIds,
             recenterTick = recenterTick,
             onMapLongClick = { lat, lng -> pendingSave = lat to lng },
             onMarkerClick = { id ->
@@ -158,8 +160,8 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             lat = lat,
             lng = lng,
             onDismiss = { pendingSave = null },
-            onSave = { name, type, radius, alertEnabled, sound ->
-                vm.savePoint(name, type, lat, lng, radius, alertEnabled, sound)
+            onSave = { name, type, radius, alertEnabled, sound, infoMode ->
+                vm.savePoint(name, type, lat, lng, radius, alertEnabled, sound, infoMode)
                 pendingSave = null
             }
         )
@@ -269,11 +271,7 @@ private fun PointInfoCard(
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(point.name, style = MaterialTheme.typography.titleMedium)
             Text(
-                text = if (point.alertEnabled) {
-                    "${point.type.label} • เตือน ${point.radiusM} ม. • ${if (point.alertSound) "เสียง" else "เงียบ"}"
-                } else {
-                    "${point.type.label} • ไม่เตือน"
-                },
+                text = pointDetail(point),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

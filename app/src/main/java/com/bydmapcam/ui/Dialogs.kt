@@ -43,21 +43,25 @@ private fun PointFormDialog(
     initialRadius: Int,
     initialAlertEnabled: Boolean,
     initialSound: Boolean,
+    initialInfoMode: Boolean,
     lat: Double,
     lng: Double,
     onDismiss: () -> Unit,
-    onConfirm: (name: String, type: PointType, radiusM: Int, alertEnabled: Boolean, alertSound: Boolean) -> Unit
+    onConfirm: (name: String, type: PointType, radiusM: Int, alertEnabled: Boolean, alertSound: Boolean, infoMode: Boolean) -> Unit
 ) {
     var name by remember { mutableStateOf(initialName) }
     var type by remember { mutableStateOf(initialType) }
     var radius by remember { mutableStateOf(initialRadius.toFloat()) }
     var alertEnabled by remember { mutableStateOf(initialAlertEnabled) }
     var sound by remember { mutableStateOf(initialSound) }
+    var infoMode by remember { mutableStateOf(initialInfoMode) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            TextButton(onClick = { onConfirm(name, type, radius.toInt(), alertEnabled, sound) }) { Text(confirmLabel) }
+            TextButton(onClick = {
+                onConfirm(name, type, radius.toInt(), alertEnabled, sound, infoMode)
+            }) { Text(confirmLabel) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("ยกเลิก") }
@@ -78,8 +82,9 @@ private fun PointFormDialog(
                             selected = type == t,
                             onClick = {
                                 type = t
-                                // Reset the alert default when the type changes.
+                                // Reset alert options to the type's default when the type changes.
                                 alertEnabled = t.defaultAlert
+                                infoMode = false
                             },
                             label = { Text(t.label) }
                         )
@@ -90,16 +95,36 @@ private fun PointFormDialog(
                     Switch(checked = alertEnabled, onCheckedChange = { alertEnabled = it })
                 }
                 if (alertEnabled) {
-                    Text("รัศมีเตือน: ${radius.toInt()} ม.")
-                    Slider(
-                        value = radius,
-                        onValueChange = { radius = it },
-                        valueRange = 100f..1000f,
-                        steps = 8
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("เตือนด้วยเสียง", modifier = Modifier.weight(1f))
-                        Switch(checked = sound, onCheckedChange = { sound = it })
+                    Text("รูปแบบเตือน", style = MaterialTheme.typography.labelLarge)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = !infoMode,
+                            onClick = { infoMode = false },
+                            label = { Text("ปกติ (วง+เสียง)") }
+                        )
+                        FilterChip(
+                            selected = infoMode,
+                            onClick = { infoMode = true },
+                            label = { Text("info (ไอคอนเด้ง 100 ม.)") }
+                        )
+                    }
+                    if (infoMode) {
+                        Text(
+                            "ไม่มีวงรัศมี — ไอคอน+ชื่อจะเด้งใหญ่ขึ้นเมื่อเข้าใกล้ 100 ม. แล้วปิดเองเมื่อผ่านไป",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    } else {
+                        Text("รัศมีเตือน: ${radius.toInt()} ม.")
+                        Slider(
+                            value = radius,
+                            onValueChange = { radius = it },
+                            valueRange = 100f..1000f,
+                            steps = 8
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("เตือนด้วยเสียง", modifier = Modifier.weight(1f))
+                            Switch(checked = sound, onCheckedChange = { sound = it })
+                        }
                     }
                 } else {
                     Text(
@@ -121,7 +146,7 @@ fun SavePointDialog(
     lat: Double,
     lng: Double,
     onDismiss: () -> Unit,
-    onSave: (name: String, type: PointType, radiusM: Int, alertEnabled: Boolean, alertSound: Boolean) -> Unit
+    onSave: (name: String, type: PointType, radiusM: Int, alertEnabled: Boolean, alertSound: Boolean, infoMode: Boolean) -> Unit
 ) {
     PointFormDialog(
         title = "บันทึกจุด",
@@ -131,6 +156,7 @@ fun SavePointDialog(
         initialRadius = 300,
         initialAlertEnabled = PointType.SPEED_CAMERA.defaultAlert,
         initialSound = true,
+        initialInfoMode = false,
         lat = lat,
         lng = lng,
         onDismiss = onDismiss,
@@ -152,17 +178,19 @@ fun EditPointDialog(
         initialRadius = point.radiusM,
         initialAlertEnabled = point.alertEnabled,
         initialSound = point.alertSound,
+        initialInfoMode = point.infoMode,
         lat = point.lat,
         lng = point.lng,
         onDismiss = onDismiss,
-        onConfirm = { name, type, radiusM, alertEnabled, alertSound ->
+        onConfirm = { name, type, radiusM, alertEnabled, alertSound, infoMode ->
             onSave(
                 point.copy(
                     name = name.ifBlank { type.label },
                     type = type,
                     radiusM = radiusM,
                     alertEnabled = alertEnabled,
-                    alertSound = alertSound
+                    alertSound = alertSound,
+                    infoMode = infoMode
                 )
             )
         }
@@ -213,9 +241,8 @@ fun PointListDialog(
     )
 }
 
-private fun pointDetail(p: AlertPoint): String =
-    if (!p.alertEnabled) {
-        "${p.type.label} • ไม่เตือน"
-    } else {
-        "${p.type.label} • เตือน ${p.radiusM} ม. • ${if (p.alertSound) "เสียง" else "เงียบ"}"
-    }
+fun pointDetail(p: AlertPoint): String = when {
+    !p.alertEnabled -> "${p.type.label} • ไม่เตือน"
+    p.infoMode -> "${p.type.label} • info (เด้งใกล้ 100 ม.)"
+    else -> "${p.type.label} • เตือน ${p.radiusM} ม. • ${if (p.alertSound) "เสียง" else "เงียบ"}"
+}

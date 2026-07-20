@@ -51,6 +51,7 @@ private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 private const val SRC_IDLE = "src-circles-idle"
 private const val SRC_ACTIVE = "src-circles-active"
 private const val SRC_CENTERS = "src-centers"
+private const val SRC_INFO = "src-info"
 private const val SRC_ME = "src-me"
 
 // Follow-camera glide duration ≈ the GPS update interval, so the map moves continuously
@@ -62,6 +63,7 @@ fun MapLibreMap(
     points: List<AlertPoint>,
     location: Location?,
     activeIds: Set<Long>,
+    infoActiveIds: Set<Long>,
     recenterTick: Int,
     onMapLongClick: (lat: Double, lng: Double) -> Unit,
     onMarkerClick: (id: Long) -> Unit,
@@ -141,6 +143,12 @@ fun MapLibreMap(
     LaunchedEffect(points, activeIds, style) {
         val s = style ?: return@LaunchedEffect
         updatePointSources(s, points, activeIds)
+    }
+
+    // INFO pop: enlarged icon+name for INFO points currently within 100 m (small, updates ~per second).
+    LaunchedEffect(infoActiveIds, points, style) {
+        val s = style ?: return@LaunchedEffect
+        updateInfoSource(s, points, infoActiveIds)
     }
 
     // Me arrow + camera: interpolate between GPS fixes at ~60fps so the arrow and the map glide
@@ -278,6 +286,32 @@ private fun setupLayers(style: Style) {
         )
     )
 
+    // INFO pop: enlarged icon + name for INFO points currently within ~100 m.
+    style.addSource(GeoJsonSource(SRC_INFO))
+    style.addLayer(
+        SymbolLayer("lyr-info", SRC_INFO).withProperties(
+            PropertyFactory.iconImage(
+                Expression.match(
+                    Expression.get("type"),
+                    Expression.literal("SPEED_CAMERA"), Expression.literal("m_camera"),
+                    Expression.literal("EV_STATION"), Expression.literal("m_ev"),
+                    Expression.literal("m_poi")
+                )
+            ),
+            PropertyFactory.iconAllowOverlap(true),
+            PropertyFactory.iconSize(1.7f),
+            PropertyFactory.textField(Expression.get("name")),
+            PropertyFactory.textFont(arrayOf("Noto Sans Regular")),
+            PropertyFactory.textSize(15f),
+            PropertyFactory.textColor(android.graphics.Color.parseColor("#0D47A1")),
+            PropertyFactory.textHaloColor(android.graphics.Color.WHITE),
+            PropertyFactory.textHaloWidth(2f),
+            PropertyFactory.textAnchor(Property.TEXT_ANCHOR_TOP),
+            PropertyFactory.textOffset(arrayOf(0f, 1.3f)),
+            PropertyFactory.textAllowOverlap(true)
+        )
+    )
+
     style.addSource(GeoJsonSource(SRC_ME))
     style.addLayer(
         SymbolLayer("lyr-me", SRC_ME).withProperties(
@@ -318,8 +352,8 @@ private fun updatePointSources(
     val active = ArrayList<Feature>()
     val centers = ArrayList<Feature>()
     for (p in points) {
-        // Only alerting points get a radius circle; every point still gets a center dot.
-        if (p.alertEnabled) {
+        // Standard-alert points get a radius circle; INFO and non-alerting points do not.
+        if (p.alertEnabled && !p.infoMode) {
             val poly = Feature.fromGeometry(circlePolygon(p.lat, p.lng, p.radiusM.toDouble()))
             if (p.id in activeIds) active.add(poly) else idle.add(poly)
         }
@@ -341,6 +375,18 @@ private fun updateMeSource(style: Style, lat: Double, lng: Double, bearing: Doub
         addNumberProperty("bearing", bearing)
     }
     style.getSourceAs<GeoJsonSource>(SRC_ME)?.setGeoJson(meFeature)
+}
+
+private fun updateInfoSource(style: Style, points: List<AlertPoint>, infoActiveIds: Set<Long>) {
+    val feats = points
+        .filter { it.infoMode && it.id in infoActiveIds }
+        .map { p ->
+            Feature.fromGeometry(Point.fromLngLat(p.lng, p.lat)).apply {
+                addStringProperty("type", p.type.name)
+                addStringProperty("name", p.name)
+            }
+        }
+    style.getSourceAs<GeoJsonSource>(SRC_INFO)?.setGeoJson(FeatureCollection.fromFeatures(feats))
 }
 
 /** Shortest-path interpolation between two bearings (degrees). */

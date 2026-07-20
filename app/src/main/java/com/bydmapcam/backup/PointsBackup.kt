@@ -20,6 +20,7 @@ object PointsBackup {
                     put("radiusM", p.radiusM)
                     put("alertEnabled", p.alertEnabled)
                     put("alertSound", p.alertSound)
+                    put("infoMode", p.infoMode)
                     put("createdAt", p.createdAt)
                 }
             )
@@ -46,6 +47,7 @@ object PointsBackup {
                     radiusM = o.optInt("radiusM", 300),
                     alertEnabled = o.optBoolean("alertEnabled", true),
                     alertSound = o.optBoolean("alertSound", true),
+                    infoMode = o.optBoolean("infoMode", false),
                     createdAt = o.optLong("createdAt", 0L)
                 )
             )

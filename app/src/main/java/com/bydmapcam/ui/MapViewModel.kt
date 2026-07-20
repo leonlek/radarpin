@@ -24,7 +24,8 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         lng: Double,
         radiusM: Int,
         alertEnabled: Boolean,
-        alertSound: Boolean
+        alertSound: Boolean,
+        infoMode: Boolean
     ) {
         viewModelScope.launch {
             repo.add(
@@ -36,6 +37,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                     radiusM = radiusM,
                     alertEnabled = alertEnabled,
                     alertSound = alertSound,
+                    infoMode = infoMode,
                     createdAt = System.currentTimeMillis()
                 )
             )

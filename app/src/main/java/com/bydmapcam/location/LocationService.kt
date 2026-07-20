@@ -114,10 +114,14 @@ class LocationService : LifecycleService(), LocationListener {
     private fun recompute() {
         val loc = lastLocation ?: return
         val nowInside = mutableSetOf<Long>()
+        val nowInfo = mutableSetOf<Long>()
         for (p in points) {
             if (!p.alertEnabled) continue // points marked "no alert" are shown on the map but never warn
             val d = GeoUtils.distanceMeters(loc.latitude, loc.longitude, p.lat, p.lng)
-            if (d <= p.radiusM) {
+            if (p.infoMode) {
+                // INFO: no beep/banner — just pops the icon up within ~100 m.
+                if (d <= INFO_DISTANCE_M) nowInfo.add(p.id)
+            } else if (d <= p.radiusM) {
                 nowInside.add(p.id)
                 // Fire only on the transition from outside -> inside.
                 if (p.id !in insideIds && p.alertSound) {
@@ -130,6 +134,7 @@ class LocationService : LifecycleService(), LocationListener {
         }
         insideIds = nowInside
         LocationBus.updateActiveAlerts(nowInside)
+        LocationBus.updateInfoActive(nowInfo)
         updateOverlay()
     }
 
@@ -267,6 +272,7 @@ class LocationService : LifecycleService(), LocationListener {
     companion object {
         private const val NOTIF_ID = 1001
         private const val CHANNEL_ID = "location"
+        private const val INFO_DISTANCE_M = 100.0
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, LocationService::class.java))
