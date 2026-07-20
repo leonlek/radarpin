@@ -51,6 +51,10 @@ private const val SRC_ACTIVE = "src-circles-active"
 private const val SRC_CENTERS = "src-centers"
 private const val SRC_ME = "src-me"
 
+// Follow-camera glide duration ≈ the GPS update interval, so the map moves continuously
+// between fixes instead of hopping. Linear easing (see easeCamera(..., false)).
+private const val FOLLOW_ANIM_MS = 1000
+
 @Composable
 fun MapLibreMap(
     points: List<AlertPoint>,
@@ -144,9 +148,10 @@ fun MapLibreMap(
                         .target(target)
                         .bearing(loc.bearing.toDouble())
                         .build()
-                    m.animateCamera(CameraUpdateFactory.newCameraPosition(cam))
+                    // Linear ease over ~1 GPS interval so the map glides smoothly between fixes.
+                    m.easeCamera(CameraUpdateFactory.newCameraPosition(cam), FOLLOW_ANIM_MS, false)
                 }
-                followMode -> m.animateCamera(CameraUpdateFactory.newLatLng(target))
+                followMode -> m.easeCamera(CameraUpdateFactory.newLatLng(target), FOLLOW_ANIM_MS, false)
             }
         }
     }
