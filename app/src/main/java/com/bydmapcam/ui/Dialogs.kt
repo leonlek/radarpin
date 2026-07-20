@@ -10,10 +10,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -207,13 +209,18 @@ fun PointListDialog(
     onDismiss: () -> Unit,
     onFocus: (AlertPoint) -> Unit,
     onEdit: (AlertPoint) -> Unit,
-    onDelete: (AlertPoint) -> Unit
+    onDelete: (AlertPoint) -> Unit,
+    onDeleteMany: (Set<Long>) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
     var typeFilter by remember { mutableStateOf<PointType?>(null) }
+    var sourceFilter by remember { mutableStateOf<Boolean?>(null) } // null=all, false=ours, true=imported
+    var selectMode by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<Set<Long>>(emptySet()) }
 
     val shown = points
         .filter { typeFilter == null || it.type == typeFilter }
+        .filter { sourceFilter == null || it.imported == sourceFilter }
         .filter { query.isBlank() || it.name.contains(query.trim(), ignoreCase = true) }
         .let { list ->
             if (currentLat != null && currentLng != null) {
@@ -237,23 +244,38 @@ fun PointListDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = typeFilter == null,
-                        onClick = { typeFilter = null },
-                        label = { Text("ทั้งหมด") }
-                    )
+                    FilterChip(typeFilter == null, { typeFilter = null }, { Text("ทุกประเภท") })
                     PointType.entries.forEach { t ->
-                        FilterChip(
-                            selected = typeFilter == t,
-                            onClick = { typeFilter = t },
-                            label = { Text(t.label) }
-                        )
+                        FilterChip(typeFilter == t, { typeFilter = t }, { Text(t.label) })
+                    }
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(sourceFilter == null, { sourceFilter = null }, { Text("ทุกแหล่ง") })
+                    FilterChip(sourceFilter == false, { sourceFilter = false }, { Text("ของเรา") })
+                    FilterChip(sourceFilter == true, { sourceFilter = true }, { Text("นำเข้า") })
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    if (selectMode) {
+                        TextButton(onClick = { selected = shown.map { it.id }.toSet() }) { Text("เลือกทั้งหมด") }
+                        Spacer(Modifier.weight(1f))
+                        TextButton(
+                            onClick = {
+                                onDeleteMany(selected)
+                                selected = emptySet()
+                                selectMode = false
+                            },
+                            enabled = selected.isNotEmpty()
+                        ) { Text("ลบ (${selected.size})") }
+                        TextButton(onClick = { selectMode = false; selected = emptySet() }) { Text("เสร็จ") }
+                    } else {
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = { selectMode = true }) { Text("เลือก") }
                     }
                 }
                 if (shown.isEmpty()) {
                     Text("ไม่พบจุด")
                 } else {
-                    LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
+                    LazyColumn(modifier = Modifier.heightIn(max = 260.dp)) {
                         items(shown, key = { it.id }) { p ->
                             val dist = if (currentLat != null && currentLng != null) {
                                 distStr(GeoUtils.distanceMeters(currentLat, currentLng, p.lat, p.lng))
@@ -262,21 +284,31 @@ fun PointListDialog(
                             }
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(vertical = 4.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (selectMode) {
+                                            selected = if (p.id in selected) selected - p.id else selected + p.id
+                                        } else {
+                                            onFocus(p)
+                                        }
+                                    }
+                                    .padding(vertical = 4.dp)
                             ) {
-                                Column(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable { onFocus(p) }
-                                ) {
+                                if (selectMode) {
+                                    Checkbox(checked = p.id in selected, onCheckedChange = null)
+                                }
+                                Column(Modifier.weight(1f)) {
                                     Text(
                                         text = if (dist != null) "${p.name}  ·  $dist" else p.name,
                                         style = MaterialTheme.typography.bodyLarge
                                     )
                                     Text(text = pointDetail(p), style = MaterialTheme.typography.bodySmall)
                                 }
-                                TextButton(onClick = { onEdit(p) }) { Text("แก้ไข") }
-                                TextButton(onClick = { onDelete(p) }) { Text("ลบ") }
+                                if (!selectMode) {
+                                    TextButton(onClick = { onEdit(p) }) { Text("แก้ไข") }
+                                    TextButton(onClick = { onDelete(p) }) { Text("ลบ") }
+                                }
                             }
                             HorizontalDivider()
                         }

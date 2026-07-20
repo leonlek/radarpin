@@ -21,6 +21,7 @@ object PointsBackup {
                     put("alertEnabled", p.alertEnabled)
                     put("alertSound", p.alertSound)
                     put("infoMode", p.infoMode)
+                    put("imported", p.imported)
                     put("createdAt", p.createdAt)
                 }
             )
@@ -48,6 +49,7 @@ object PointsBackup {
                     alertEnabled = o.optBoolean("alertEnabled", true),
                     alertSound = o.optBoolean("alertSound", true),
                     infoMode = o.optBoolean("infoMode", false),
+                    imported = o.optBoolean("imported", false),
                     createdAt = o.optLong("createdAt", 0L)
                 )
             )

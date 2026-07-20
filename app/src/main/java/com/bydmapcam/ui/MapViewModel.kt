@@ -51,6 +51,11 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { repo.delete(point) }
     }
 
+    fun deleteMany(ids: Set<Long>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch { repo.deleteByIds(ids) }
+    }
+
     fun updatePoint(point: AlertPoint) {
         viewModelScope.launch { repo.update(point) }
     }

@@ -27,4 +27,7 @@ interface AlertPointDao {
 
     @Query("DELETE FROM alert_points WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM alert_points WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<Long>)
 }

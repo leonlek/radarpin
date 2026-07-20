@@ -180,7 +180,8 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 focus = p.lat to p.lng
             },
             onEdit = { editingPoint = it },
-            onDelete = { vm.delete(it) }
+            onDelete = { vm.delete(it) },
+            onDeleteMany = { ids -> vm.deleteMany(ids) }
         )
     }
 
