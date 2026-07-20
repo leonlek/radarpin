@@ -29,12 +29,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -223,19 +226,29 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
 @Composable
 private fun SpeedChip(speedMps: Float, modifier: Modifier = Modifier) {
     val kmh = (speedMps * 3.6f).toInt().coerceAtLeast(0)
+    // Tabular figures (tnum) → every digit is the same width, so the number never jitters.
+    val numberStyle = TextStyle(
+        color = Color.White,
+        fontSize = 46.sp,
+        fontWeight = FontWeight.Bold,
+        fontFeatureSettings = "tnum",
+        textAlign = TextAlign.Center
+    )
     Surface(
         modifier = modifier,
         color = MaterialTheme.colorScheme.primary,
         shape = MaterialTheme.shapes.large,
         shadowElevation = 4.dp
     ) {
-        Text(
-            text = "$kmh",
-            color = Color.White,
-            fontSize = 46.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 22.dp, vertical = 4.dp)
-        )
+        Box(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            // Invisible "000" reserves a fixed 3-digit width so the pill never resizes
+            // as the speed crosses 1 → 2 → 3 digits; the live number is centered on top.
+            Text("000", style = numberStyle, modifier = Modifier.alpha(0f))
+            Text("$kmh", style = numberStyle)
+        }
     }
 }
 
