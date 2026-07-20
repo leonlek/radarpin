@@ -26,7 +26,7 @@ object Settings {
         prefs(context).edit().putBoolean(KEY_OVERLAY, value).apply()
 
     fun headingUp(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_HEADING_UP, false) // default OFF (north-up)
+        prefs(context).getBoolean(KEY_HEADING_UP, true) // default ON (map faces driving direction)
 
     fun setHeadingUp(context: Context, value: Boolean) =
         prefs(context).edit().putBoolean(KEY_HEADING_UP, value).apply()

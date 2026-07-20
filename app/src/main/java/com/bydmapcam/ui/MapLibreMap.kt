@@ -1,10 +1,12 @@
 package com.bydmapcam.ui
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.RectF
 import android.location.Location
+import android.view.animation.LinearInterpolator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -53,7 +55,7 @@ private const val SRC_ME = "src-me"
 
 // Follow-camera glide duration ≈ the GPS update interval, so the map moves continuously
 // between fixes instead of hopping. Linear easing (see easeCamera(..., false)).
-private const val FOLLOW_ANIM_MS = 1000
+private const val FOLLOW_ANIM_MS = 1000L
 
 @Composable
 fun MapLibreMap(
@@ -75,6 +77,8 @@ fun MapLibreMap(
     var firstFix by remember { mutableStateOf(true) }
     // Camera follows the car until the user pans; the locate button re-enables it.
     var followMode by remember { mutableStateOf(true) }
+    var prevLoc by remember { mutableStateOf<Location?>(null) }
+    val meAnimator = remember { ValueAnimator.ofFloat(0f, 1f).apply { interpolator = LinearInterpolator() } }
 
     DisposableEffect(lifecycleOwner, mapView) {
         val observer = LifecycleEventObserver { _, event ->
@@ -89,7 +93,10 @@ fun MapLibreMap(
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            meAnimator.cancel()
+        }
     }
 
     AndroidView(factory = { mapView }, modifier = modifier) { mv ->
@@ -129,31 +136,58 @@ fun MapLibreMap(
         }
     }
 
-    LaunchedEffect(points, activeIds, location, style) {
+    // Circles + markers: rebuild ONLY when the saved points / active set change — not on every GPS
+    // tick — so the markers & labels don't re-render and flicker while the car moves.
+    LaunchedEffect(points, activeIds, style) {
         val s = style ?: return@LaunchedEffect
-        updateSources(s, points, activeIds, location)
+        updatePointSources(s, points, activeIds)
+    }
 
-        val m = map
-        val loc = location
-        if (m != null && loc != null) {
-            val target = LatLng(loc.latitude, loc.longitude)
-            when {
-                firstFix -> {
-                    m.moveCamera(CameraUpdateFactory.newLatLngZoom(target, 15.0))
-                    firstFix = false
-                }
-                followMode && headingUp && loc.hasBearing() -> {
-                    // Heading-up: rotate the map so the driving direction is "up".
+    // Me arrow + camera: interpolate between GPS fixes at ~60fps so the arrow and the map glide
+    // together (arrow stays glued to centre) instead of hopping once per fix.
+    LaunchedEffect(location, style) {
+        val s = style ?: return@LaunchedEffect
+        val loc = location ?: return@LaunchedEffect
+        val m = map ?: return@LaunchedEffect
+        val from = prevLoc
+        prevLoc = loc
+        val toBearing = if (loc.hasBearing()) loc.bearing.toDouble() else 0.0
+
+        if (from == null) {
+            updateMeSource(s, loc.latitude, loc.longitude, toBearing)
+            if (firstFix) {
+                m.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(loc.latitude, loc.longitude), 15.0))
+                firstFix = false
+            }
+            return@LaunchedEffect
+        }
+
+        val fromLat = from.latitude
+        val fromLng = from.longitude
+        val fromBearing = if (from.hasBearing()) from.bearing.toDouble() else toBearing
+
+        meAnimator.cancel()
+        meAnimator.duration = FOLLOW_ANIM_MS
+        meAnimator.removeAllUpdateListeners()
+        meAnimator.addUpdateListener { anim ->
+            val t = anim.animatedFraction.toDouble()
+            val lat = fromLat + (loc.latitude - fromLat) * t
+            val lng = fromLng + (loc.longitude - fromLng) * t
+            val bearing = lerpAngle(fromBearing, toBearing, t)
+            updateMeSource(s, lat, lng, bearing)
+            if (followMode) {
+                if (headingUp) {
                     val cam = CameraPosition.Builder(m.cameraPosition)
-                        .target(target)
-                        .bearing(loc.bearing.toDouble())
+                        .target(LatLng(lat, lng))
+                        .bearing(bearing)
                         .build()
-                    // Linear ease over ~1 GPS interval so the map glides smoothly between fixes.
-                    m.easeCamera(CameraUpdateFactory.newCameraPosition(cam), FOLLOW_ANIM_MS, false)
+                    m.moveCamera(CameraUpdateFactory.newCameraPosition(cam))
+                } else {
+                    m.moveCamera(CameraUpdateFactory.newLatLng(LatLng(lat, lng)))
                 }
-                followMode -> m.easeCamera(CameraUpdateFactory.newLatLng(target), FOLLOW_ANIM_MS, false)
             }
         }
+        meAnimator.start()
     }
 
     // Snap the map back to north-up when heading-up is turned off.
@@ -275,11 +309,10 @@ private fun addMarkerImages(style: Style, context: Context) {
     style.addImage("me_arrow", drawableToBitmap(context, R.drawable.ic_me_arrow))
 }
 
-private fun updateSources(
+private fun updatePointSources(
     style: Style,
     points: List<AlertPoint>,
-    activeIds: Set<Long>,
-    location: Location?
+    activeIds: Set<Long>
 ) {
     val idle = ArrayList<Feature>()
     val active = ArrayList<Feature>()
@@ -301,13 +334,19 @@ private fun updateSources(
     style.getSourceAs<GeoJsonSource>(SRC_IDLE)?.setGeoJson(FeatureCollection.fromFeatures(idle))
     style.getSourceAs<GeoJsonSource>(SRC_ACTIVE)?.setGeoJson(FeatureCollection.fromFeatures(active))
     style.getSourceAs<GeoJsonSource>(SRC_CENTERS)?.setGeoJson(FeatureCollection.fromFeatures(centers))
-    location?.let {
-        val bearing = if (it.hasBearing()) it.bearing.toDouble() else 0.0
-        val meFeature = Feature.fromGeometry(Point.fromLngLat(it.longitude, it.latitude)).apply {
-            addNumberProperty("bearing", bearing)
-        }
-        style.getSourceAs<GeoJsonSource>(SRC_ME)?.setGeoJson(meFeature)
+}
+
+private fun updateMeSource(style: Style, lat: Double, lng: Double, bearing: Double) {
+    val meFeature = Feature.fromGeometry(Point.fromLngLat(lng, lat)).apply {
+        addNumberProperty("bearing", bearing)
     }
+    style.getSourceAs<GeoJsonSource>(SRC_ME)?.setGeoJson(meFeature)
+}
+
+/** Shortest-path interpolation between two bearings (degrees). */
+private fun lerpAngle(from: Double, to: Double, t: Double): Double {
+    val diff = ((to - from + 540.0) % 360.0) - 180.0
+    return (from + diff * t + 360.0) % 360.0
 }
 
 /** Approximate a circle of [radiusM] meters around a lat/lng as a GeoJSON polygon. */

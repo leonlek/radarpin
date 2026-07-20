@@ -12,12 +12,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -30,10 +32,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.bydmapcam.R
 import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.location.LocationBus
 import com.bydmapcam.settings.Settings
@@ -54,6 +58,10 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     var selectedPoint by remember { mutableStateOf<AlertPoint?>(null) }
     var focus by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var headingUp by remember { mutableStateOf(Settings.headingUp(context)) }
+    var bannerDismissed by remember { mutableStateOf<Set<Long>>(emptySet()) }
+
+    // Reset the in-app banner dismissal once you leave all alert zones, so it re-shows next time.
+    LaunchedEffect(activeIds) { if (activeIds.isEmpty()) bannerDismissed = emptySet() }
 
     Box(Modifier.fillMaxSize()) {
         MapLibreMap(
@@ -85,9 +93,28 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             location?.let { loc -> SpeedChip(speedMps = loc.speed) }
 
             val activePoints = points.filter { it.id in activeIds }
-            if (activePoints.isNotEmpty()) {
-                AlertBanner(points = activePoints, modifier = Modifier.fillMaxWidth())
+            if (activePoints.isNotEmpty() && activeIds != bannerDismissed) {
+                AlertBanner(
+                    points = activePoints,
+                    onDismiss = { bannerDismissed = activeIds },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
+        }
+
+        // Settings gear, top-right.
+        SmallFloatingActionButton(
+            onClick = { showSettings = true },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(12.dp)
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_gear),
+                contentDescription = "ตั้งค่า",
+                tint = MaterialTheme.colorScheme.onPrimaryContainer
+            )
         }
 
         // Bottom-right controls, clear of the navigation bar.
@@ -99,9 +126,6 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
             horizontalAlignment = Alignment.End
         ) {
-            SmallFloatingActionButton(onClick = { showSettings = true }) {
-                Text("⚙", fontSize = 20.sp)
-            }
             SmallFloatingActionButton(onClick = { recenterTick++ }) {
                 LocateIcon(color = MaterialTheme.colorScheme.onPrimaryContainer)
             }
@@ -195,21 +219,34 @@ private fun SpeedChip(speedMps: Float, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun AlertBanner(points: List<AlertPoint>, modifier: Modifier = Modifier) {
+private fun AlertBanner(
+    points: List<AlertPoint>,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     Surface(
         modifier = modifier,
         color = Color(0xFFE53935),
         shape = MaterialTheme.shapes.medium,
         shadowElevation = 6.dp
     ) {
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
-            Text(
-                text = "⚠ ใกล้จุดเตือน",
-                color = Color.White,
-                style = MaterialTheme.typography.titleMedium
-            )
-            points.take(3).forEach {
-                Text(text = "• ${it.name} (${it.type.label})", color = Color.White)
+        Row(verticalAlignment = Alignment.Top) {
+            Column(
+                Modifier
+                    .weight(1f)
+                    .padding(start = 20.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)
+            ) {
+                Text(
+                    text = "⚠ ใกล้จุดเตือน",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                points.take(3).forEach {
+                    Text(text = "• ${it.name} (${it.type.label})", color = Color.White)
+                }
+            }
+            TextButton(onClick = onDismiss) {
+                Text("✕", color = Color.White, fontSize = 20.sp)
             }
         }
     }
