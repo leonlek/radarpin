@@ -23,6 +23,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.bydmapcam.R
 import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.location.AppState
+import com.bydmapcam.offline.MapCamera
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
@@ -108,6 +109,11 @@ fun MapLibreMap(
                     if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
                         followMode = false
                     }
+                }
+                // Publish the visible region so the offline downloader can grab "what's on screen".
+                m.addOnCameraIdleListener {
+                    MapCamera.bounds = m.projection.visibleRegion.latLngBounds
+                    MapCamera.zoom = m.cameraPosition.zoom
                 }
                 // Long-press anywhere to add a point at that map location.
                 m.addOnMapLongClickListener { latLng ->

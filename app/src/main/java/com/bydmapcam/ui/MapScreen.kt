@@ -58,6 +58,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     var editingPoint by remember { mutableStateOf<AlertPoint?>(null) }
     var recenterTick by remember { mutableIntStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
+    var showOffline by remember { mutableStateOf(false) }
     var selectedPoint by remember { mutableStateOf<AlertPoint?>(null) }
     var focus by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var headingUp by remember { mutableStateOf(Settings.headingUp(context)) }
@@ -209,8 +210,13 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 }
                 showSettings = false
             },
+            onOpenOffline = { showSettings = false; showOffline = true },
             onDismiss = { showSettings = false }
         )
+    }
+
+    if (showOffline) {
+        OfflineMapsDialog(onDismiss = { showOffline = false })
     }
 }
 

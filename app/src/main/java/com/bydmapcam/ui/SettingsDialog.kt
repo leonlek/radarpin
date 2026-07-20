@@ -28,6 +28,7 @@ fun SettingsDialog(
     headingUp: Boolean,
     onHeadingUpChange: (Boolean) -> Unit,
     onImportCameras: () -> Unit,
+    onOpenOffline: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -99,6 +100,12 @@ fun SettingsDialog(
                     subtitle = "ดึงกล้องจับความเร็ว (OpenStreetMap) เพิ่มลงแผนที่"
                 ) {
                     TextButton(onClick = onImportCameras) { Text("นำเข้า") }
+                }
+                SettingRow(
+                    title = "แผนที่ออฟไลน์",
+                    subtitle = "เก็บพื้นที่ที่เห็นบนจอไว้ใช้ตอนไม่มีเน็ต"
+                ) {
+                    TextButton(onClick = onOpenOffline) { Text("จัดการ") }
                 }
             }
         }
