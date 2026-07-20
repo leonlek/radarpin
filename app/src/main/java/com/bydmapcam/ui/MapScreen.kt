@@ -171,6 +171,8 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     if (showList) {
         PointListDialog(
             points = points,
+            currentLat = location?.latitude,
+            currentLng = location?.longitude,
             onDismiss = { showList = false },
             onFocus = { p ->
                 showList = false

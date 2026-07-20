@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.data.PointType
+import com.bydmapcam.location.GeoUtils
 
 /** Shared create/edit form for a saved point. */
 @Composable
@@ -200,46 +202,93 @@ fun EditPointDialog(
 @Composable
 fun PointListDialog(
     points: List<AlertPoint>,
+    currentLat: Double?,
+    currentLng: Double?,
     onDismiss: () -> Unit,
     onFocus: (AlertPoint) -> Unit,
     onEdit: (AlertPoint) -> Unit,
     onDelete: (AlertPoint) -> Unit
 ) {
+    var query by remember { mutableStateOf("") }
+    var typeFilter by remember { mutableStateOf<PointType?>(null) }
+
+    val shown = points
+        .filter { typeFilter == null || it.type == typeFilter }
+        .filter { query.isBlank() || it.name.contains(query.trim(), ignoreCase = true) }
+        .let { list ->
+            if (currentLat != null && currentLng != null) {
+                list.sortedBy { GeoUtils.distanceMeters(currentLat, currentLng, it.lat, it.lng) }
+            } else {
+                list
+            }
+        }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("ปิด") } },
-        title = { Text("จุดที่บันทึก (${points.size})") },
+        title = { Text("จุดที่บันทึก (${shown.size}/${points.size})") },
         text = {
-            if (points.isEmpty()) {
-                Text("ยังไม่มีจุดที่บันทึก")
-            } else {
-                LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
-                    items(points, key = { it.id }) { p ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(vertical = 4.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable { onFocus(p) }
-                            ) {
-                                Text(p.name, style = MaterialTheme.typography.bodyLarge)
-                                Text(
-                                    text = pointDetail(p),
-                                    style = MaterialTheme.typography.bodySmall
-                                )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("ค้นหาชื่อ") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = typeFilter == null,
+                        onClick = { typeFilter = null },
+                        label = { Text("ทั้งหมด") }
+                    )
+                    PointType.entries.forEach { t ->
+                        FilterChip(
+                            selected = typeFilter == t,
+                            onClick = { typeFilter = t },
+                            label = { Text(t.label) }
+                        )
+                    }
+                }
+                if (shown.isEmpty()) {
+                    Text("ไม่พบจุด")
+                } else {
+                    LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
+                        items(shown, key = { it.id }) { p ->
+                            val dist = if (currentLat != null && currentLng != null) {
+                                distStr(GeoUtils.distanceMeters(currentLat, currentLng, p.lat, p.lng))
+                            } else {
+                                null
                             }
-                            TextButton(onClick = { onEdit(p) }) { Text("แก้ไข") }
-                            TextButton(onClick = { onDelete(p) }) { Text("ลบ") }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { onFocus(p) }
+                                ) {
+                                    Text(
+                                        text = if (dist != null) "${p.name}  ·  $dist" else p.name,
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                    Text(text = pointDetail(p), style = MaterialTheme.typography.bodySmall)
+                                }
+                                TextButton(onClick = { onEdit(p) }) { Text("แก้ไข") }
+                                TextButton(onClick = { onDelete(p) }) { Text("ลบ") }
+                            }
+                            HorizontalDivider()
                         }
-                        HorizontalDivider()
                     }
                 }
             }
         }
     )
 }
+
+private fun distStr(m: Double): String =
+    if (m >= 1000) "%.1f กม.".format(m / 1000.0) else "${m.toInt()} ม."
 
 fun pointDetail(p: AlertPoint): String = when {
     !p.alertEnabled -> "${p.type.label} • ไม่เตือน"
