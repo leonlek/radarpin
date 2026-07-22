@@ -2,7 +2,11 @@
 
 package com.bydmapcam.ui
 
+import androidx.annotation.DrawableRes
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -12,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -32,7 +37,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import com.bydmapcam.R
 import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.data.PointType
 import com.bydmapcam.location.GeoUtils
@@ -217,6 +225,8 @@ fun PointListDialog(
     var sourceFilter by remember { mutableStateOf<Boolean?>(null) } // null=all, false=ours, true=imported
     var selectMode by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    // Give the list ~half the screen height (clamped) so it isn't squeezed by the filters.
+    val listMaxHeight = (LocalConfiguration.current.screenHeightDp * 0.5f).dp.coerceIn(240.dp, 520.dp)
 
     val shown = points
         .filter { typeFilter == null || it.type == typeFilter }
@@ -243,17 +253,35 @@ fun PointListDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(typeFilter == null, { typeFilter = null }, { Text("ทุกประเภท") })
-                    PointType.entries.forEach { t ->
-                        FilterChip(typeFilter == t, { typeFilter = t }, { Text(t.label) })
+                // Type filter (compact icon chips = map/list badge) + select toggle on one line.
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilterChip(typeFilter == null, { typeFilter = null }, { Text("ทั้งหมด") })
+                        PointType.entries.forEach { t ->
+                            FilterChip(
+                                selected = typeFilter == t,
+                                onClick = { typeFilter = if (typeFilter == t) null else t },
+                                label = {
+                                    Image(
+                                        painter = painterResource(t.markerRes()),
+                                        contentDescription = t.label,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            )
+                        }
+                    }
+                    if (!selectMode) {
+                        TextButton(onClick = { selectMode = true }) { Text("เลือก") }
                     }
                 }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(sourceFilter == null, { sourceFilter = null }, { Text("ทุกแหล่ง") })
-                    FilterChip(sourceFilter == false, { sourceFilter = false }, { Text("ของเรา") })
-                    FilterChip(sourceFilter == true, { sourceFilter = true }, { Text("นำเข้า") })
-                }
+                // Source filter, or the multi-select action bar when selecting.
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     if (selectMode) {
                         TextButton(onClick = { selected = shown.map { it.id }.toSet() }) { Text("เลือกทั้งหมด") }
@@ -268,14 +296,20 @@ fun PointListDialog(
                         ) { Text("ลบ (${selected.size})") }
                         TextButton(onClick = { selectMode = false; selected = emptySet() }) { Text("เสร็จ") }
                     } else {
-                        Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { selectMode = true }) { Text("เลือก") }
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            FilterChip(sourceFilter == null, { sourceFilter = null }, { Text("ทุกแหล่ง") })
+                            FilterChip(sourceFilter == false, { sourceFilter = false }, { Text("ของเรา") })
+                            FilterChip(sourceFilter == true, { sourceFilter = true }, { Text("นำเข้า") })
+                        }
                     }
                 }
                 if (shown.isEmpty()) {
                     Text("ไม่พบจุด")
                 } else {
-                    LazyColumn(modifier = Modifier.heightIn(max = 260.dp)) {
+                    LazyColumn(modifier = Modifier.heightIn(max = listMaxHeight)) {
                         items(shown, key = { it.id }) { p ->
                             val dist = if (currentLat != null && currentLng != null) {
                                 distStr(GeoUtils.distanceMeters(currentLat, currentLng, p.lat, p.lng))
@@ -298,6 +332,13 @@ fun PointListDialog(
                                 if (selectMode) {
                                     Checkbox(checked = p.id in selected, onCheckedChange = null)
                                 }
+                                Image(
+                                    painter = painterResource(p.type.markerRes()),
+                                    contentDescription = p.type.label,
+                                    modifier = Modifier
+                                        .padding(end = 10.dp)
+                                        .size(30.dp)
+                                )
                                 Column(Modifier.weight(1f)) {
                                     Text(
                                         text = if (dist != null) "${p.name}  ·  $dist" else p.name,
@@ -317,6 +358,13 @@ fun PointListDialog(
             }
         }
     )
+}
+
+@DrawableRes
+fun PointType.markerRes(): Int = when (this) {
+    PointType.SPEED_CAMERA -> R.drawable.ic_marker_camera
+    PointType.POI -> R.drawable.ic_marker_poi
+    PointType.EV_STATION -> R.drawable.ic_marker_ev
 }
 
 private fun distStr(m: Double): String =
