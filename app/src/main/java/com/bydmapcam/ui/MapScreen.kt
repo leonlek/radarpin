@@ -11,7 +11,10 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -31,7 +34,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -44,6 +49,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bydmapcam.R
 import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.location.LocationBus
+import com.bydmapcam.radio.RadioPlayer
 import com.bydmapcam.settings.Settings
 
 @Composable
@@ -66,6 +72,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     var focus by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var headingUp by remember { mutableStateOf(Settings.headingUp(context)) }
     var bannerDismissed by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    val radioState by RadioPlayer.state.collectAsState()
 
     // Reset the in-app banner dismissal once you leave all alert zones, so it re-shows next time.
     LaunchedEffect(activeIds) { if (activeIds.isEmpty()) bannerDismissed = emptySet() }
@@ -146,6 +153,34 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             }) {
                 Text("บันทึกจุดนี้")
             }
+        }
+
+        // Bottom-left: FM Green Wave 106.5 radio toggle (streams straight off the net).
+        ExtendedFloatingActionButton(
+            onClick = { RadioPlayer.toggle() },
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .navigationBarsPadding()
+                .padding(16.dp)
+        ) {
+            val tint = MaterialTheme.colorScheme.onPrimaryContainer
+            if (radioState == RadioPlayer.State.BUFFERING) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = tint
+                )
+            } else {
+                RadioGlyph(playing = radioState == RadioPlayer.State.PLAYING, color = tint)
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                when (radioState) {
+                    RadioPlayer.State.BUFFERING -> "กำลังเชื่อม…"
+                    RadioPlayer.State.ERROR -> "ลองใหม่"
+                    else -> "Green Wave"
+                }
+            )
         }
 
         selectedPoint?.let { p ->
@@ -322,6 +357,28 @@ private fun PointInfoCard(
                 TextButton(onClick = onDelete) { Text("ลบ") }
                 TextButton(onClick = onClose) { Text("ปิด") }
             }
+        }
+    }
+}
+
+/** Play triangle (stopped) / stop square (playing), drawn with Canvas — no icon dependency. */
+@Composable
+private fun RadioGlyph(playing: Boolean, color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier.size(18.dp)) {
+        if (playing) {
+            val s = size.minDimension * 0.72f
+            val o = (size.minDimension - s) / 2f
+            drawRect(color = color, topLeft = Offset(o, o), size = Size(s, s))
+        } else {
+            val w = size.width
+            val h = size.height
+            val tri = Path().apply {
+                moveTo(w * 0.22f, h * 0.15f)
+                lineTo(w * 0.85f, h * 0.5f)
+                lineTo(w * 0.22f, h * 0.85f)
+                close()
+            }
+            drawPath(tri, color)
         }
     }
 }
