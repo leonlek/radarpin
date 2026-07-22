@@ -8,10 +8,11 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [AlertPoint::class], version = 4, exportSchema = false)
+@Database(entities = [AlertPoint::class, Trip::class], version = 5, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun alertPointDao(): AlertPointDao
+    abstract fun tripDao(): TripDao
 
     companion object {
         @Volatile
@@ -35,13 +36,29 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS trips (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "startTime INTEGER NOT NULL, " +
+                        "endTime INTEGER NOT NULL, " +
+                        "distanceKm REAL NOT NULL, " +
+                        "startSoc INTEGER NOT NULL, " +
+                        "endSoc INTEGER NOT NULL, " +
+                        "pricePerKwh REAL)"
+                )
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "byd-map-cam.db"
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .build().also { INSTANCE = it }
             }
     }
 }

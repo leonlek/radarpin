@@ -7,6 +7,9 @@ import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.data.CameraImport
 import com.bydmapcam.data.PointRepository
 import com.bydmapcam.data.PointType
+import com.bydmapcam.data.Trip
+import com.bydmapcam.data.TripRepository
+import com.bydmapcam.trip.TripTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -16,9 +19,34 @@ import kotlinx.coroutines.withContext
 
 class MapViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = PointRepository(app)
+    private val tripRepo = TripRepository(app)
 
     val points: StateFlow<List<AlertPoint>> =
         repo.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val recentTrips: StateFlow<List<Trip>> =
+        tripRepo.observeRecent().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun startTrip(startSoc: Int) = TripTracker.start(startSoc, System.currentTimeMillis())
+
+    fun cancelTrip() = TripTracker.cancel()
+
+    /** Finish the active trip: snapshot distance/start-SoC from the tracker, save, report the row back. */
+    fun finishTrip(endSoc: Int, pricePerKwh: Double?, onSaved: (Trip) -> Unit) {
+        val a = TripTracker.finish() ?: return
+        val trip = Trip(
+            startTime = a.startTime,
+            endTime = System.currentTimeMillis(),
+            distanceKm = a.distanceKm,
+            startSoc = a.startSoc,
+            endSoc = endSoc,
+            pricePerKwh = pricePerKwh
+        )
+        viewModelScope.launch {
+            tripRepo.save(trip)
+            onSaved(trip)
+        }
+    }
 
     fun savePoint(
         name: String,

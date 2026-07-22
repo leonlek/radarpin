@@ -48,9 +48,12 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bydmapcam.R
 import com.bydmapcam.data.AlertPoint
+import com.bydmapcam.data.Trip
+import com.bydmapcam.data.avgKmPerPercent
 import com.bydmapcam.location.LocationBus
 import com.bydmapcam.radio.RadioPlayer
 import com.bydmapcam.settings.Settings
+import com.bydmapcam.trip.TripTracker
 
 @Composable
 fun MapScreen(vm: MapViewModel = viewModel()) {
@@ -73,6 +76,14 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     var headingUp by remember { mutableStateOf(Settings.headingUp(context)) }
     var bannerDismissed by remember { mutableStateOf<Set<Long>>(emptySet()) }
     val radioState by RadioPlayer.state.collectAsState()
+
+    val activeTrip by TripTracker.active.collectAsState()
+    val recentTrips by vm.recentTrips.collectAsState()
+    val avgKmPct = remember(recentTrips) { avgKmPerPercent(recentTrips) }
+    var showTripStart by remember { mutableStateOf(false) }
+    var showTripFinish by remember { mutableStateOf(false) }
+    var tripSummary by remember { mutableStateOf<Trip?>(null) }
+    var showTripHistory by remember { mutableStateOf(false) }
 
     // Reset the in-app banner dismissal once you leave all alert zones, so it re-shows next time.
     LaunchedEffect(activeIds) { if (activeIds.isEmpty()) bannerDismissed = emptySet() }
@@ -116,6 +127,16 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                     modifier = Modifier.fillMaxWidth()
                 )
             }
+
+            // Live trip panel — centered under the top row, shown only while a trip runs.
+            activeTrip?.let { t ->
+                TripStatusCard(
+                    distanceKm = t.distanceKm,
+                    avgKmPerPercent = avgKmPct,
+                    onFinish = { showTripFinish = true },
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+            }
         }
 
         // Settings gear, top-right.
@@ -144,6 +165,11 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         ) {
             SmallFloatingActionButton(onClick = { recenterTick++ }) {
                 LocateIcon(color = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+            if (activeTrip == null) {
+                SmallFloatingActionButton(onClick = { showTripStart = true }) {
+                    Text("ทริป")
+                }
             }
             SmallFloatingActionButton(onClick = { showList = true }) {
                 Text("จุด")
@@ -237,10 +263,53 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         )
     }
 
+    if (showTripStart) {
+        StartTripDialog(
+            onDismiss = { showTripStart = false },
+            onStart = { startSoc ->
+                vm.startTrip(startSoc)
+                showTripStart = false
+            }
+        )
+    }
+
+    if (showTripFinish) {
+        activeTrip?.let { t ->
+            FinishTripDialog(
+                distanceKm = t.distanceKm,
+                startSoc = t.startSoc,
+                onDismiss = { showTripFinish = false },
+                onDiscard = { vm.cancelTrip(); showTripFinish = false },
+                onFinish = { endSoc, price ->
+                    vm.finishTrip(endSoc, price) { saved ->
+                        tripSummary = saved
+                    }
+                    showTripFinish = false
+                }
+            )
+        } ?: run { showTripFinish = false }
+    }
+
+    tripSummary?.let { t ->
+        TripSummaryDialog(
+            trip = t,
+            onOpenHistory = { tripSummary = null; showTripHistory = true },
+            onDismiss = { tripSummary = null }
+        )
+    }
+
+    if (showTripHistory) {
+        TripHistoryDialog(
+            trips = recentTrips,
+            onDismiss = { showTripHistory = false }
+        )
+    }
+
     if (showSettings) {
         SettingsDialog(
             headingUp = headingUp,
             onHeadingUpChange = { headingUp = it; Settings.setHeadingUp(context, it) },
+            onOpenTripHistory = { showSettings = false; showTripHistory = true },
             onImportCameras = {
                 Toast.makeText(context, "กำลังนำเข้าฐานกล้อง…", Toast.LENGTH_SHORT).show()
                 vm.importCameras { count ->

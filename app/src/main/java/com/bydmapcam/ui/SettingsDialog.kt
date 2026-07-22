@@ -29,6 +29,7 @@ fun SettingsDialog(
     onHeadingUpChange: (Boolean) -> Unit,
     onImportCameras: () -> Unit,
     onOpenOffline: () -> Unit,
+    onOpenTripHistory: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -106,6 +107,12 @@ fun SettingsDialog(
                     subtitle = "เก็บพื้นที่ที่เห็นบนจอไว้ใช้ตอนไม่มีเน็ต"
                 ) {
                     TextButton(onClick = onOpenOffline) { Text("จัดการ") }
+                }
+                SettingRow(
+                    title = "ประวัติทริป",
+                    subtitle = "กม./1% + ค่าเฉลี่ย + ประมาณระยะที่เหลือ (5 ทริปล่าสุด)"
+                ) {
+                    TextButton(onClick = onOpenTripHistory) { Text("ดู") }
                 }
             }
         }
