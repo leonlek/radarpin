@@ -116,6 +116,16 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // Live trip panel — flush at the top edge, centered, shown only while a trip runs.
+            activeTrip?.let { t ->
+                TripStatusCard(
+                    distanceKm = t.distanceKm,
+                    avgKmPerPercent = avgKmPct,
+                    onFinish = { showTripFinish = true },
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+            }
+
             location?.let { loc -> SpeedChip(speedMps = loc.speed) }
 
             val activePoints = points.filter { it.id in activeIds }
@@ -125,16 +135,6 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                     distances = alertDistances,
                     onDismiss = { bannerDismissed = activeIds },
                     modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            // Live trip panel — centered under the top row, shown only while a trip runs.
-            activeTrip?.let { t ->
-                TripStatusCard(
-                    distanceKm = t.distanceKm,
-                    avgKmPerPercent = avgKmPct,
-                    onFinish = { showTripFinish = true },
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
                 )
             }
         }
