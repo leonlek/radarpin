@@ -156,6 +156,33 @@ fun FinishTripDialog(
     )
 }
 
+/** Shown once on launch when a trip was left running from a previous run (engine off before "จบ"). */
+@Composable
+fun RestoreTripDialog(
+    startSoc: Int,
+    distanceKm: Double,
+    startTime: Long,
+    onContinue: () -> Unit,
+    onFinish: () -> Unit,
+    onDiscard: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onContinue, // tap-outside = keep driving (least destructive)
+        dismissButton = { TextButton(onClick = onDiscard) { Text("ทิ้ง") } },
+        confirmButton = { TextButton(onClick = onFinish) { Text("จบทริป") } },
+        title = { Text("มีทริปค้าง") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("เหลือค้างจากคราวก่อน (ยังไม่ได้กดจบ):", style = MaterialTheme.typography.bodySmall)
+                LabelValue("เริ่มที่แบต", "$startSoc%")
+                LabelValue("ระยะสะสม", "%.1f กม.".format(distanceKm))
+                LabelValue("เริ่มเมื่อ", fmtTripTime(startTime))
+                TextButton(onClick = onContinue) { Text("↩ ขับต่อ (นับระยะต่อ)") }
+            }
+        }
+    )
+}
+
 @Composable
 fun TripSummaryDialog(
     trip: Trip,

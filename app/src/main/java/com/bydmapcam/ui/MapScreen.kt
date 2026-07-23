@@ -78,6 +78,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     val radioState by RadioPlayer.state.collectAsState()
 
     val activeTrip by TripTracker.active.collectAsState()
+    val restoredTrip by TripTracker.restored.collectAsState()
     val recentTrips by vm.recentTrips.collectAsState()
     val avgKmPct = remember(recentTrips) { avgKmPerPercent(recentTrips) }
     var showTripStart by remember { mutableStateOf(false) }
@@ -261,6 +262,20 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 editingPoint = null
             }
         )
+    }
+
+    // A trip left running from a previous run — ask keep / finish / discard before it corrupts.
+    if (restoredTrip) {
+        activeTrip?.let { t ->
+            RestoreTripDialog(
+                startSoc = t.startSoc,
+                distanceKm = t.distanceKm,
+                startTime = t.startTime,
+                onContinue = { TripTracker.acknowledgeRestore() },
+                onFinish = { TripTracker.acknowledgeRestore(); showTripFinish = true },
+                onDiscard = { vm.cancelTrip() }
+            )
+        }
     }
 
     if (showTripStart) {
