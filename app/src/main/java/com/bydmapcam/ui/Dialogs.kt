@@ -44,6 +44,7 @@ import com.bydmapcam.R
 import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.data.PointType
 import com.bydmapcam.location.GeoUtils
+import com.bydmapcam.location.LocationService
 
 /** Shared create/edit form for a saved point. */
 @Composable
@@ -117,12 +118,12 @@ private fun PointFormDialog(
                         FilterChip(
                             selected = infoMode,
                             onClick = { infoMode = true },
-                            label = { Text("info (ไอคอนเด้ง 100 ม.)") }
+                            label = { Text("info (ไอคอนเด้ง ${LocationService.INFO_DISTANCE_M.toInt()} ม.)") }
                         )
                     }
                     if (infoMode) {
                         Text(
-                            "ไม่มีวงรัศมี — ไอคอน+ชื่อจะเด้งใหญ่ขึ้นเมื่อเข้าใกล้ 100 ม. แล้วปิดเองเมื่อผ่านไป",
+                            "ไม่มีวงรัศมี — ไอคอน+ชื่อจะเด้งใหญ่ขึ้นเมื่อเข้าใกล้ ${LocationService.INFO_DISTANCE_M.toInt()} ม. แล้วปิดเองเมื่อผ่านไป",
                             style = MaterialTheme.typography.bodySmall
                         )
                     } else {
@@ -165,7 +166,7 @@ fun SavePointDialog(
         confirmLabel = "บันทึก",
         initialName = "",
         initialType = PointType.SPEED_CAMERA,
-        initialRadius = 300,
+        initialRadius = 500,
         initialAlertEnabled = PointType.SPEED_CAMERA.defaultAlert,
         initialSound = true,
         initialInfoMode = false,
@@ -372,6 +373,6 @@ private fun distStr(m: Double): String =
 
 fun pointDetail(p: AlertPoint): String = when {
     !p.alertEnabled -> "${p.type.label} • ไม่เตือน"
-    p.infoMode -> "${p.type.label} • info (เด้งใกล้ 100 ม.)"
+    p.infoMode -> "${p.type.label} • info (เด้งใกล้ ${LocationService.INFO_DISTANCE_M.toInt()} ม.)"
     else -> "${p.type.label} • เตือน ${p.radiusM} ม. • ${if (p.alertSound) "เสียง" else "เงียบ"}"
 }

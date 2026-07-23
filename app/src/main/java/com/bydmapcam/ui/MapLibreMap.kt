@@ -150,7 +150,7 @@ fun MapLibreMap(
         updatePointSources(s, points, activeIds)
     }
 
-    // INFO pop: enlarged icon+name for INFO points currently within 100 m (small, updates ~per second).
+    // INFO pop: enlarged icon+name for INFO points currently within ~200 m (small, updates ~per second).
     LaunchedEffect(infoActiveIds, points, style, inForeground) {
         val s = style ?: return@LaunchedEffect
         if (!inForeground) return@LaunchedEffect
@@ -273,7 +273,7 @@ private fun setupLayers(style: Style) {
         )
     )
 
-    // INFO pop: enlarged icon + name for INFO points currently within ~100 m.
+    // INFO pop: enlarged icon + name for INFO points currently within ~200 m.
     style.addSource(GeoJsonSource(SRC_INFO))
     style.addLayer(
         SymbolLayer("lyr-info", SRC_INFO).withProperties(

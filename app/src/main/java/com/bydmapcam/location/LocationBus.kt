@@ -13,7 +13,7 @@ object LocationBus {
     private val _activeAlertIds = MutableStateFlow<Set<Long>>(emptySet())
     val activeAlertIds: StateFlow<Set<Long>> = _activeAlertIds
 
-    /** ids of INFO-style points the car is currently within ~100 m of (icon pops up). */
+    /** ids of INFO-style points the car is currently within ~200 m of (icon pops up). */
     private val _infoActiveIds = MutableStateFlow<Set<Long>>(emptySet())
     val infoActiveIds: StateFlow<Set<Long>> = _infoActiveIds
 

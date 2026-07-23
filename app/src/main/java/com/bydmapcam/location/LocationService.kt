@@ -126,7 +126,7 @@ class LocationService : LifecycleService(), LocationListener {
             if (!p.alertEnabled) continue // points marked "no alert" are shown on the map but never warn
             val d = GeoUtils.distanceMeters(loc.latitude, loc.longitude, p.lat, p.lng)
             if (p.infoMode) {
-                // INFO: no beep/banner — just pops the icon up within ~100 m.
+                // INFO: no beep/banner — just pops the icon up within ~200 m.
                 if (d <= INFO_DISTANCE_M) nowInfo.add(p.id)
                 continue
             }
@@ -304,7 +304,8 @@ class LocationService : LifecycleService(), LocationListener {
     companion object {
         private const val NOTIF_ID = 1001
         private const val CHANNEL_ID = "location"
-        private const val INFO_DISTANCE_M = 100.0
+        /** How close an INFO point gets before its icon+name pops up (then closes past it). */
+        const val INFO_DISTANCE_M = 200.0
         private const val MOVING_SPEED_MPS = 2.5f  // ~9 km/h; below this, heading is unreliable
         private const val AWAY_ANGLE_DEG = 115.0   // point is behind us -> driving away -> suppress
 

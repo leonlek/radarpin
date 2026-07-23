@@ -45,7 +45,7 @@ object PointsBackup {
                         .getOrDefault(PointType.POI),
                     lat = o.getDouble("lat"),
                     lng = o.getDouble("lng"),
-                    radiusM = o.optInt("radiusM", 300),
+                    radiusM = o.optInt("radiusM", 500),
                     alertEnabled = o.optBoolean("alertEnabled", true),
                     alertSound = o.optBoolean("alertSound", true),
                     infoMode = o.optBoolean("infoMode", false),
