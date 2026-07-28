@@ -7,7 +7,9 @@ import android.graphics.RectF
 import android.location.Location
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -21,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -81,6 +84,8 @@ fun MapLibreMap(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
+    val navBarInsetPx = WindowInsets.navigationBars.getBottom(density)
     val lifecycleOwner = LocalLifecycleOwner.current
     val mapView = remember { MapView(context) }
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
@@ -198,6 +203,18 @@ fun MapLibreMap(
             }
             followMode -> m.easeCamera(CameraUpdateFactory.newLatLng(target), FOLLOW_ANIM_MS, false)
         }
+    }
+
+    // Keep the OpenStreetMap credit readable: MapLibre parks the logo + (i) in the bottom-left
+    // corner, i.e. under the radio button and behind the system nav bar. Lift it clear of both —
+    // the attribution has to stay visible, it's the licence term we ship under.
+    LaunchedEffect(map, navBarInsetPx) {
+        val m = map ?: return@LaunchedEffect
+        val pad = with(density) { 8.dp.roundToPx() }
+        val bottom = navBarInsetPx + pad
+        m.uiSettings.setLogoMargins(pad, 0, 0, bottom)
+        // Sits clear of the ~93 dp wide MapLibre wordmark so the two don't overlap.
+        m.uiSettings.setAttributionMargins(with(density) { 104.dp.roundToPx() }, 0, 0, bottom)
     }
 
     // Snap the map back to north-up when heading-up is turned off.

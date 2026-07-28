@@ -212,11 +212,13 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         }
 
         // Bottom-left: what's playing elsewhere (only while something is), above our own radio.
+        // Extra bottom padding leaves the OpenStreetMap credit strip uncovered — it has to stay
+        // readable, so our buttons sit above it rather than on top of it.
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .navigationBarsPadding()
-                .padding(16.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 40.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             nowPlaying?.let { np ->
