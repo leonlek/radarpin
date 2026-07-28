@@ -10,6 +10,7 @@ object Settings {
     private const val KEY_OVERLAY = "overlay_enabled"
     private const val KEY_HEADING_UP = "heading_up"
     private const val KEY_DIRECTION_AWARE = "direction_aware"
+    private const val KEY_AUTO_BOOT = "auto_start_boot"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
@@ -37,6 +38,13 @@ object Settings {
 
     fun setDirectionAware(context: Context, value: Boolean) =
         prefs(context).edit().putBoolean(KEY_DIRECTION_AWARE, value).apply()
+
+    /** Open the app by itself when the head unit boots. */
+    fun autoStartOnBoot(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_AUTO_BOOT, false) // default OFF
+
+    fun setAutoStartOnBoot(context: Context, value: Boolean) =
+        prefs(context).edit().putBoolean(KEY_AUTO_BOOT, value).apply()
 
     fun canDrawOverlays(context: Context): Boolean = AndroidSettings.canDrawOverlays(context)
 }

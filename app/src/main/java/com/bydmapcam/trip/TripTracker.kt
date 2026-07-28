@@ -27,8 +27,24 @@ object TripTracker {
     data class Active(
         val startSoc: Int,
         val startTime: Long,
-        val distanceKm: Double
-    )
+        val distanceKm: Double,
+        /** Latest % battery the driver typed in mid-trip, and the distance it was taken at. */
+        val soc: Int? = null,
+        val socKm: Double = 0.0
+    ) {
+        /** The most recent % we know of — the mid-trip reading, else the trip's start %. */
+        val latestSoc: Int get() = soc ?: startSoc
+
+        /** % used between the start and the latest mid-trip reading; null until one is entered. */
+        val socUsedSoFar: Int? get() = soc?.let { startSoc - it }
+
+        /** km per 1% measured over that stretch — the efficiency "as of that reading". */
+        val kmPerPercentSoFar: Double?
+            get() {
+                val used = socUsedSoFar ?: return null
+                return if (used > 0 && socKm > 0) socKm / used else null
+            }
+    }
 
     private val _active = MutableStateFlow<Active?>(null)
     val active: StateFlow<Active?> = _active.asStateFlow()
@@ -58,7 +74,13 @@ object TripTracker {
         lastPersistMeters = accumMeters
         lastLat = Double.NaN
         lastLng = Double.NaN
-        _active.value = Active(startSoc, startTime, dist)
+        _active.value = Active(
+            startSoc = startSoc,
+            startTime = startTime,
+            distanceKm = dist,
+            soc = p.getInt(KEY_SOC, -1).takeIf { it >= 0 },
+            socKm = Double.fromBits(p.getLong(KEY_SOC_KM_BITS, 0L))
+        )
         _restored.value = true
         startCollector()
     }
@@ -72,6 +94,13 @@ object TripTracker {
         _restored.value = false
         persist()
         startCollector()
+    }
+
+    /** Record the % battery read off the dash right now, so the UI can show the live km/1%. */
+    fun setSoc(pct: Int) {
+        val a = _active.value ?: return
+        _active.value = a.copy(soc = pct, socKm = a.distanceKm)
+        persist()
     }
 
     /** User has seen the restore prompt and chose to keep driving — stop nagging. */
@@ -132,6 +161,8 @@ object TripTracker {
             ?.putInt(KEY_START_SOC, a.startSoc)
             ?.putLong(KEY_START_TIME, a.startTime)
             ?.putLong(KEY_DISTANCE_BITS, a.distanceKm.toRawBits())
+            ?.putInt(KEY_SOC, a.soc ?: -1)
+            ?.putLong(KEY_SOC_KM_BITS, a.socKm.toRawBits())
             ?.apply()
     }
 
@@ -143,4 +174,6 @@ object TripTracker {
     private const val KEY_START_SOC = "startSoc"
     private const val KEY_START_TIME = "startTime"
     private const val KEY_DISTANCE_BITS = "distanceBits"
+    private const val KEY_SOC = "soc"
+    private const val KEY_SOC_KM_BITS = "socKmBits"
 }

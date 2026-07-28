@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.bydmapcam.media.MediaLink
 import com.bydmapcam.settings.Settings
 
 @Composable
@@ -36,6 +37,8 @@ fun SettingsDialog(
     var tts by remember { mutableStateOf(Settings.ttsEnabled(context)) }
     var overlay by remember { mutableStateOf(Settings.overlayEnabled(context)) }
     var directionAware by remember { mutableStateOf(Settings.directionAware(context)) }
+    var autoBoot by remember { mutableStateOf(Settings.autoStartOnBoot(context)) }
+    val mediaAccess = MediaLink.hasAccess(context)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -96,6 +99,34 @@ fun SettingsDialog(
                     )
                 }
                 HorizontalDivider()
+                SettingRow(
+                    title = "เปิดแอปเองตอนสตาร์ทรถ",
+                    subtitle = "เปิดแอปอัตโนมัติเมื่อจอบูตเสร็จ (ต้องอนุญาต \"แสดงทับแอปอื่น\")"
+                ) {
+                    Switch(
+                        checked = autoBoot,
+                        onCheckedChange = {
+                            autoBoot = it
+                            Settings.setAutoStartOnBoot(context, it)
+                        }
+                    )
+                }
+                SettingRow(
+                    title = "แสดงชื่อเพลงที่กำลังเล่น",
+                    subtitle = if (mediaAccess)
+                        "อนุญาตแล้ว — แถบคุมเพลงจะขึ้นชื่อเพลง/ศิลปิน"
+                    else
+                        "ปุ่มคุมเพลงใช้ได้อยู่แล้ว · เปิด \"การเข้าถึงการแจ้งเตือน\" เพิ่ม เพื่อให้เห็นชื่อเพลง"
+                ) {
+                    TextButton(onClick = {
+                        runCatching {
+                            context.startActivity(
+                                Intent(AndroidSettings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        }
+                    }) { Text(if (mediaAccess) "จัดการ" else "อนุญาต") }
+                }
                 SettingRow(
                     title = "นำเข้าฐานกล้องทั่วไทย",
                     subtitle = "ดึงกล้องจับความเร็ว (OpenStreetMap) เพิ่มลงแผนที่"

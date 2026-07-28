@@ -2,6 +2,7 @@ package com.bydmapcam.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,7 +21,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -36,18 +39,35 @@ import com.bydmapcam.data.costBaht
 import com.bydmapcam.data.fullRangeKm
 import com.bydmapcam.data.kmPerPercent
 import com.bydmapcam.data.socUsed
+import com.bydmapcam.trip.TripTracker
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Compact live panel shown only while a trip is running (distance so far + learned avg km/1%). */
+/**
+ * Compact live panel shown only while a trip is running: distance + elapsed driving time, the
+ * measured km/1% once the driver has entered two % readings (falling back to the learned average),
+ * a 🔋 button to enter the current % and a "จบ" button.
+ */
 @Composable
 fun TripStatusCard(
-    distanceKm: Double,
+    trip: TripTracker.Active,
     avgKmPerPercent: Double?,
+    onSetSoc: () -> Unit,
     onFinish: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Ticks once a second so the elapsed time counts up on its own.
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(trip.startTime) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(1000)
+        }
+    }
+    val measured = trip.kmPerPercentSoFar
+    val socTo = trip.soc
     Surface(
         modifier = modifier,
         color = MaterialTheme.colorScheme.primaryContainer,
@@ -60,17 +80,40 @@ fun TripStatusCard(
         ) {
             Column {
                 Text(
-                    text = "🚗 %.1f กม.".format(distanceKm),
+                    text = "🚗 %.1f กม.".format(trip.distanceKm),
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
                 )
                 Text(
-                    text = avgKmPerPercent?.let { "⌀ %.1f กม./1%%".format(it) } ?: "⌀ — กม./1%",
-                    style = MaterialTheme.typography.bodySmall
+                    text = buildString {
+                        append("⏱ ").append(fmtElapsed(now - trip.startTime))
+                        append("  ·  ")
+                        when {
+                            measured != null && socTo != null ->
+                                append("%.1f กม./1%% (%d→%d%%)".format(measured, trip.startSoc, socTo))
+                            avgKmPerPercent != null -> append("⌀ %.1f กม./1%%".format(avgKmPerPercent))
+                            else -> append("⌀ — กม./1%")
+                        }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1
                 )
             }
-            Spacer(Modifier.width(14.dp))
-            FilledTonalButton(onClick = onFinish) { Text("จบ") }
+            Spacer(Modifier.width(10.dp))
+            FilledTonalButton(
+                onClick = onSetSoc,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text("🔋 ${trip.latestSoc}%", maxLines = 1, softWrap = false)
+            }
+            Spacer(Modifier.width(6.dp))
+            FilledTonalButton(
+                onClick = onFinish,
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+            ) {
+                Text("จบ", maxLines = 1, softWrap = false)
+            }
         }
     }
 }
@@ -94,6 +137,50 @@ fun StartTripDialog(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("อ่านเลข % แบตจากหน้าปัดรถแล้วกรอก", style = MaterialTheme.typography.bodySmall)
                 PercentField(value = soc, onValueChange = { soc = it }, label = "แบตตอนนี้ (%)")
+            }
+        }
+    )
+}
+
+/** Enter the % battery read off the dash mid-trip, to get the km/1% at this very moment. */
+@Composable
+fun TripSocDialog(
+    startSoc: Int,
+    distanceKm: Double,
+    onDismiss: () -> Unit,
+    onSet: (Int) -> Unit
+) {
+    var soc by remember { mutableStateOf("") }
+    val pct = soc.toIntOrNull()
+    val valid = pct != null && pct in 0..100
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        dismissButton = { TextButton(onClick = onDismiss) { Text("ยกเลิก") } },
+        confirmButton = {
+            TextButton(enabled = valid, onClick = { onSet(pct!!) }) { Text("บันทึก") }
+        },
+        title = { Text("ใส่ % แบตตอนนี้") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "อ่านเลข % แบตจากหน้าปัดรถตอนนี้ แล้วจะเห็น กม./1% ณ ตอนนี้บนการ์ดทริป",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                LabelValue("เริ่มทริปที่", "$startSoc%")
+                LabelValue("วิ่งมาแล้ว", "%.1f กม.".format(distanceKm))
+                PercentField(value = soc, onValueChange = { soc = it }, label = "แบตตอนนี้ (%)")
+                // Live preview of what the card will show, so a typo is obvious before saving.
+                val used = pct?.let { startSoc - it }
+                Text(
+                    text = when {
+                        !valid -> " "
+                        used == null || used <= 0 -> "แบตไม่ลด — ยังคิด กม./1% ไม่ได้"
+                        // Every literal % must be escaped as %% — this whole string goes through format().
+                        else -> "→ ใช้ไป %d%%  ·  %.1f กม./1%%".format(used, distanceKm / used)
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
     )
@@ -301,3 +388,12 @@ private fun LabelValue(label: String, value: String) {
 
 private val tripTimeFmt = SimpleDateFormat("d MMM HH:mm", Locale.forLanguageTag("th-TH"))
 private fun fmtTripTime(millis: Long): String = tripTimeFmt.format(Date(millis))
+
+/** Stopwatch-style elapsed time: m:ss under an hour, h:mm:ss past it. */
+private fun fmtElapsed(millis: Long): String {
+    val total = (millis / 1000).coerceAtLeast(0)
+    val h = total / 3600
+    val m = (total % 3600) / 60
+    val s = total % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+}

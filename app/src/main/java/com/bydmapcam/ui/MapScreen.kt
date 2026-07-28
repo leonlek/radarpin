@@ -47,13 +47,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bydmapcam.R
+import com.bydmapcam.alert.AlertFormat
 import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.data.Trip
 import com.bydmapcam.data.avgKmPerPercent
 import com.bydmapcam.location.LocationBus
+import com.bydmapcam.media.MediaLink
 import com.bydmapcam.radio.RadioPlayer
 import com.bydmapcam.settings.Settings
 import com.bydmapcam.trip.TripTracker
+import kotlinx.coroutines.delay
 
 @Composable
 fun MapScreen(vm: MapViewModel = viewModel()) {
@@ -76,12 +79,26 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     var headingUp by remember { mutableStateOf(Settings.headingUp(context)) }
     var bannerDismissed by remember { mutableStateOf<Set<Long>>(emptySet()) }
     val radioState by RadioPlayer.state.collectAsState()
+    val nowPlaying by MediaLink.nowPlaying.collectAsState()
+
+    // Watch other apps' media sessions while we're on screen. With notification access we get live
+    // callbacks (title + state); without it, poll the "is music playing" flag so the transport
+    // buttons still show up — it's the only signal available then.
+    LaunchedEffect(Unit) {
+        MediaLink.start(context)
+        while (!MediaLink.hasAccess(context)) {
+            MediaLink.refreshWithoutAccess(context)
+            delay(3000)
+            MediaLink.start(context) // picks up the moment the user grants access
+        }
+    }
 
     val activeTrip by TripTracker.active.collectAsState()
     val restoredTrip by TripTracker.restored.collectAsState()
     val recentTrips by vm.recentTrips.collectAsState()
     val avgKmPct = remember(recentTrips) { avgKmPerPercent(recentTrips) }
     var showTripStart by remember { mutableStateOf(false) }
+    var showTripSoc by remember { mutableStateOf(false) }
     var showTripFinish by remember { mutableStateOf(false) }
     var tripSummary by remember { mutableStateOf<Trip?>(null) }
     var showTripHistory by remember { mutableStateOf(false) }
@@ -108,51 +125,63 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             modifier = Modifier.fillMaxSize()
         )
 
-        // Top overlays: stacked vertically below the status bar so they never overlap.
+        // Top overlays. The speed sits in the very top-left corner and drops below the trip card
+        // while a trip runs; the settings gear owns its own column on the right so the trip card /
+        // banner can never slide under it.
         Column(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(12.dp),
+                .statusBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Live trip panel — flush at the top edge, centered, shown only while a trip runs.
-            activeTrip?.let { t ->
-                TripStatusCard(
-                    distanceKm = t.distanceKm,
-                    avgKmPerPercent = avgKmPct,
-                    onFinish = { showTripFinish = true },
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
-                )
-            }
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 6.dp, top = 2.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Live trip panel — takes the top slot, so the speed chip drops under it.
+                    activeTrip?.let { t ->
+                        TripStatusCard(
+                            trip = t,
+                            avgKmPerPercent = avgKmPct,
+                            onSetSoc = { showTripSoc = true },
+                            onFinish = { showTripFinish = true }
+                        )
+                    }
 
-            location?.let { loc -> SpeedChip(speedMps = loc.speed) }
+                    location?.let { loc -> SpeedChip(speedMps = loc.speed) }
+                }
+
+                SmallFloatingActionButton(
+                    onClick = { showSettings = true },
+                    modifier = Modifier.padding(start = 8.dp, end = 12.dp, top = 6.dp)
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_gear),
+                        contentDescription = "ตั้งค่า",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
 
             val activePoints = points.filter { it.id in activeIds }
             if (activePoints.isNotEmpty() && activeIds != bannerDismissed) {
                 AlertBanner(
                     points = activePoints,
                     distances = alertDistances,
+                    onSelect = { p ->
+                        selectedPoint = p
+                        focus = p.lat to p.lng
+                    },
                     onDismiss = { bannerDismissed = activeIds },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
                 )
             }
-        }
-
-        // Settings gear, top-right.
-        SmallFloatingActionButton(
-            onClick = { showSettings = true },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .statusBarsPadding()
-                .padding(12.dp)
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_gear),
-                contentDescription = "ตั้งค่า",
-                tint = MaterialTheme.colorScheme.onPrimaryContainer
-            )
         }
 
         // Bottom-right controls, clear of the navigation bar.
@@ -182,32 +211,54 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             }
         }
 
-        // Bottom-left: FM Green Wave 106.5 radio toggle (streams straight off the net).
-        ExtendedFloatingActionButton(
-            onClick = { RadioPlayer.toggle() },
+        // Bottom-left: what's playing elsewhere (only while something is), above our own radio.
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .navigationBarsPadding()
-                .padding(16.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            val tint = MaterialTheme.colorScheme.onPrimaryContainer
-            if (radioState == RadioPlayer.State.BUFFERING) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
-                    color = tint
+            nowPlaying?.let { np ->
+                MediaBar(
+                    nowPlaying = np,
+                    onPrevious = { MediaLink.previous(context) },
+                    onPlayPause = {
+                        // Starting someone else's music: our radio gets out of the way.
+                        if (!np.playing) RadioPlayer.stop()
+                        MediaLink.playPause(context)
+                    },
+                    onNext = { MediaLink.next(context) }
                 )
-            } else {
-                RadioGlyph(playing = radioState == RadioPlayer.State.PLAYING, color = tint)
             }
-            Spacer(Modifier.width(8.dp))
-            Text(
-                when (radioState) {
-                    RadioPlayer.State.BUFFERING -> "กำลังเชื่อม…"
-                    RadioPlayer.State.ERROR -> "ลองใหม่"
-                    else -> "Green Wave"
+
+            // FM Green Wave 106.5 radio toggle (streams straight off the net).
+            ExtendedFloatingActionButton(onClick = {
+                // …and the same courtesy in reverse.
+                if (radioState == RadioPlayer.State.STOPPED || radioState == RadioPlayer.State.ERROR) {
+                    MediaLink.pause(context)
                 }
-            )
+                RadioPlayer.toggle()
+            }) {
+                val tint = MaterialTheme.colorScheme.onPrimaryContainer
+                if (radioState == RadioPlayer.State.BUFFERING) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = tint
+                    )
+                } else {
+                    RadioGlyph(playing = radioState == RadioPlayer.State.PLAYING, color = tint)
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    when (radioState) {
+                        RadioPlayer.State.BUFFERING -> "กำลังเชื่อม…"
+                        RadioPlayer.State.ERROR -> "ลองใหม่"
+                        else -> "Green Wave"
+                    }
+                )
+            }
         }
 
         selectedPoint?.let { p ->
@@ -286,6 +337,21 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 showTripStart = false
             }
         )
+    }
+
+    // Mid-trip battery reading → live km/1% right now.
+    if (showTripSoc) {
+        activeTrip?.let { t ->
+            TripSocDialog(
+                startSoc = t.startSoc,
+                distanceKm = t.distanceKm,
+                onDismiss = { showTripSoc = false },
+                onSet = { pct ->
+                    vm.setTripSoc(pct)
+                    showTripSoc = false
+                }
+            )
+        } ?: run { showTripSoc = false }
     }
 
     if (showTripFinish) {
@@ -375,12 +441,22 @@ private fun SpeedChip(speedMps: Float, modifier: Modifier = Modifier) {
 private fun AlertBanner(
     points: List<AlertPoint>,
     distances: Map<Long, Int>,
+    onSelect: (AlertPoint) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Highlight the nearest point's distance big in the header (live countdown).
+    // Highlight the nearest point's distance big in the header (live countdown, floored at 100 m).
     val nearest = points.mapNotNull { distances[it.id] }.minOrNull()
+    val header = when {
+        nearest == null -> "⚠ ใกล้จุดเตือน"
+        nearest >= AlertFormat.FLOOR_M -> "⚠ ใกล้จุดเตือน — อีก $nearest ม."
+        else -> "⚠ ถึงจุดเตือนแล้ว"
+    }
+    // Tapping the banner jumps the map to the point being warned about (the nearest one),
+    // same as tapping its marker — you're already in the app, so "open the app" would be a no-op.
+    val nearestPoint = points.minByOrNull { distances[it.id] ?: Int.MAX_VALUE } ?: points.first()
     Surface(
+        onClick = { onSelect(nearestPoint) },
         modifier = modifier,
         color = Color(0xFFE53935),
         shape = MaterialTheme.shapes.medium,
@@ -393,13 +469,13 @@ private fun AlertBanner(
                     .padding(start = 20.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)
             ) {
                 Text(
-                    text = if (nearest != null) "⚠ ใกล้จุดเตือน — อีก $nearest ม." else "⚠ ใกล้จุดเตือน",
+                    text = header,
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
                 )
                 points.take(3).forEach {
                     val dm = distances[it.id]
-                    val tail = if (dm != null) " — $dm ม." else " (${it.type.label})"
+                    val tail = if (dm != null) " — ${AlertFormat.countdown(dm)}" else " (${it.type.label})"
                     Text(text = "• ${it.name}$tail", color = Color.White)
                 }
             }

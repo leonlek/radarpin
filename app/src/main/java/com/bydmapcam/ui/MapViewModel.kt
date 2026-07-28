@@ -31,6 +31,9 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
     fun cancelTrip() = TripTracker.cancel()
 
+    /** Record the % battery the driver read off the dash mid-trip (drives the live km/1%). */
+    fun setTripSoc(pct: Int) = TripTracker.setSoc(pct)
+
     /** Finish the active trip: snapshot distance/start-SoC from the tracker, save, report the row back. */
     fun finishTrip(endSoc: Int, pricePerKwh: Double?, onSaved: (Trip) -> Unit) {
         val a = TripTracker.finish() ?: return

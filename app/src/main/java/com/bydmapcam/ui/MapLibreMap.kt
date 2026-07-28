@@ -5,6 +5,10 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.RectF
 import android.location.Location
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -13,9 +17,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.core.content.ContextCompat
@@ -100,10 +108,15 @@ fun MapLibreMap(
         }
     }
 
-    AndroidView(factory = { mapView }, modifier = modifier) { mv ->
+    Box(modifier) {
+    AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize()) { mv ->
         if (map == null) {
             mv.getMapAsync { m ->
                 map = m
+                // MapLibre's compass sits in the top-right corner — right under our settings gear —
+                // and pops up any time heading-up rotates the map. The me-arrow already shows which
+                // way the car faces, so drop it rather than stack two controls on the same spot.
+                m.uiSettings.isCompassEnabled = false
                 // A user pan/zoom gesture turns off auto-follow.
                 m.addOnCameraMoveStartedListener { reason ->
                     if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
@@ -166,7 +179,9 @@ fun MapLibreMap(
         if (!inForeground) return@LaunchedEffect
 
         val bearing = if (loc.hasBearing()) loc.bearing.toDouble() else 0.0
-        updateMeSource(s, loc.latitude, loc.longitude, bearing)
+        // While following, the arrow is the pinned overlay below — publishing the layer arrow too
+        // would put a second, once-a-second-teleporting arrow on top of it.
+        updateMeSource(s, loc.latitude, loc.longitude, bearing, visible = !followMode)
 
         val target = LatLng(loc.latitude, loc.longitude)
         when {
@@ -214,6 +229,23 @@ fun MapLibreMap(
         val f = focus ?: return@LaunchedEffect
         followMode = false
         map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(f.first, f.second), 16.5))
+    }
+
+        // The camera glides to each new fix over a full second, but a map-layer marker can only
+        // teleport once per fix — hence the hopping. While following, pin the arrow to the centre
+        // and let the map slide underneath it (what turn-by-turn navigators do); costs nothing per
+        // frame. When the user pans away, the layer arrow takes over at the real position.
+        if (followMode && location != null) {
+            Image(
+                painter = painterResource(R.drawable.ic_me_arrow),
+                contentDescription = null,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(32.dp)
+                    // Heading-up already rotates the whole map, so the arrow simply points up.
+                    .rotate(if (headingUp && location.hasBearing()) 0f else location.bearing)
+            )
+        }
     }
 }
 
@@ -357,7 +389,18 @@ private fun updatePointSources(
     style.getSourceAs<GeoJsonSource>(SRC_CENTERS)?.setGeoJson(FeatureCollection.fromFeatures(centers))
 }
 
-private fun updateMeSource(style: Style, lat: Double, lng: Double, bearing: Double) {
+private fun updateMeSource(
+    style: Style,
+    lat: Double,
+    lng: Double,
+    bearing: Double,
+    visible: Boolean
+) {
+    if (!visible) {
+        style.getSourceAs<GeoJsonSource>(SRC_ME)
+            ?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
+        return
+    }
     val meFeature = Feature.fromGeometry(Point.fromLngLat(lng, lat)).apply {
         addNumberProperty("bearing", bearing)
     }

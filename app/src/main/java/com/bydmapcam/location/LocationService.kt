@@ -28,6 +28,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.bydmapcam.MainActivity
 import com.bydmapcam.R
+import com.bydmapcam.alert.AlertFormat
 import com.bydmapcam.alert.Beeper
 import com.bydmapcam.alert.Speaker
 import com.bydmapcam.data.AlertPoint
@@ -50,10 +51,19 @@ class LocationService : LifecycleService(), LocationListener {
     private var overlayLabel: TextView? = null
     private var overlayDismissedFor: Set<Long> = emptySet()
 
+    /** When the car first stopped in the current stretch (0 = it's moving). */
+    private var stationarySince = 0L
+
+    /** Parked inside an alert zone → alerts muted until the car drives off again. */
+    private var parked = false
+
     override fun onCreate() {
         super.onCreate()
         repository = PointRepository(this)
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        // Start out parked if that's how we were left: otherwise re-opening the app while parked
+        // inside a camera's radius beeps + banners all over again every single time.
+        parked = getSharedPreferences(STATE_PREF, Context.MODE_PRIVATE).getBoolean(KEY_PARKED, false)
 
         repository.observeAll()
             .onEach { points = it; recompute() }
@@ -113,6 +123,7 @@ class LocationService : LifecycleService(), LocationListener {
      *  saved-points list changes, so an alert fires immediately (e.g. right after saving). */
     private fun recompute() {
         val loc = lastLocation ?: return
+        updateParked(loc)
         val nowInside = mutableSetOf<Long>()
         val nowInfo = mutableSetOf<Long>()
         val distances = mutableMapOf<Long, Int>()
@@ -130,6 +141,9 @@ class LocationService : LifecycleService(), LocationListener {
                 if (d <= INFO_DISTANCE_M) nowInfo.add(p.id)
                 continue
             }
+            // Parked inside the radius: you're not driving at this camera, you're sitting next to
+            // it. Muting also clears insideIds, so pulling away re-arms and beeps like a fresh pass.
+            if (parked) continue
             if (d > p.radiusM) continue
 
             // Direction filter: suppress points we're clearly driving AWAY from (behind us —
@@ -159,6 +173,37 @@ class LocationService : LifecycleService(), LocationListener {
         updateOverlay()
     }
 
+    /**
+     * "Parked" = stopped for [PARKED_AFTER_MS] straight. A red light or a jam is shorter than that,
+     * so those still warn; sitting at home/work next to a saved camera goes quiet instead of leaving
+     * a banner stuck on screen. The first real movement un-parks immediately.
+     */
+    private fun updateParked(loc: Location) {
+        val kmh = if (loc.hasSpeed()) loc.speed * 3.6f else 0f
+        // Un-park only on a speed the car can't fake while standing still: a parked GPS drifts by
+        // 1–3 km/h, and one such blip must not undo the mute (measured on-device — it did).
+        if (kmh >= UNPARK_KMH) {
+            stationarySince = 0L
+            setParked(false)
+            return
+        }
+        // Crawling (2–10 km/h): neither driving off nor settled — hold whatever state we're in.
+        if (kmh >= PARKED_KMH) {
+            stationarySince = 0L
+            return
+        }
+        val now = System.currentTimeMillis()
+        if (stationarySince == 0L) stationarySince = now
+        else if (now - stationarySince >= PARKED_AFTER_MS) setParked(true)
+    }
+
+    private fun setParked(value: Boolean) {
+        if (parked == value) return
+        parked = value
+        getSharedPreferences(STATE_PREF, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_PARKED, value).apply()
+    }
+
     /** Round to a spoken-friendly distance (100s far out, 50s mid, 10s close). */
     private fun roundDist(d: Double): Int = when {
         d >= 300 -> (d / 100).toInt() * 100
@@ -184,7 +229,8 @@ class LocationService : LifecycleService(), LocationListener {
             .take(3)
             .joinToString("\n") { p ->
                 val dm = dist[p.id]
-                if (dm != null) "• ${p.name} — อีก $dm ม." else "• ${p.name} (${p.type.label})"
+                if (dm != null) "• ${p.name} — ${AlertFormat.countdown(dm)}"
+                else "• ${p.name} (${p.type.label})"
             }
         showOverlay("⚠ ใกล้จุดเตือน — แตะเพื่อเปิดแอป\n$names")
     }
@@ -308,6 +354,11 @@ class LocationService : LifecycleService(), LocationListener {
         const val INFO_DISTANCE_M = 200.0
         private const val MOVING_SPEED_MPS = 2.5f  // ~9 km/h; below this, heading is unreliable
         private const val AWAY_ANGLE_DEG = 115.0   // point is behind us -> driving away -> suppress
+        private const val PARKED_KMH = 2f          // below this the car is standing still
+        private const val UNPARK_KMH = 10f         // above this it has genuinely driven off
+        private const val PARKED_AFTER_MS = 120_000L // stopped this long = parked -> mute alerts
+        private const val STATE_PREF = "alert_state"
+        private const val KEY_PARKED = "parked"
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, LocationService::class.java))
