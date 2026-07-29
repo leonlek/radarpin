@@ -1,6 +1,7 @@
 package com.bydmapcam.ui
 
 import android.content.Intent
+import android.widget.Toast
 import android.net.Uri
 import android.provider.Settings as AndroidSettings
 import androidx.compose.foundation.layout.Arrangement
@@ -114,16 +115,17 @@ fun SettingsDialog(
                 SettingRow(
                     title = "แสดงชื่อเพลงที่กำลังเล่น",
                     subtitle = if (mediaAccess)
-                        "อนุญาตแล้ว — แถบคุมเพลงจะขึ้นชื่อเพลง/ศิลปิน"
+                        "อนุญาตแล้ว — แถบเพลงจะขึ้นชื่อเพลงที่กำลังเล่น"
                     else
-                        "ปุ่มคุมเพลงใช้ได้อยู่แล้ว · เปิด \"การเข้าถึงการแจ้งเตือน\" เพิ่ม เพื่อให้เห็นชื่อเพลง"
+                        "ปุ่มเล่น/หยุดใช้ได้อยู่แล้ว · เปิด \"การเข้าถึงการแจ้งเตือน\" เพิ่ม เพื่อให้เห็นชื่อเพลง (บางหัวรถไม่มีหน้านี้)"
                 ) {
                     TextButton(onClick = {
-                        runCatching {
-                            context.startActivity(
-                                Intent(AndroidSettings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
+                        if (!MediaLink.openAccessSettings(context)) {
+                            Toast.makeText(
+                                context,
+                                "เครื่องนี้ไม่มีหน้า \"การเข้าถึงการแจ้งเตือน\" — แถบคุมเพลงจึงใช้ไม่ได้",
+                                Toast.LENGTH_LONG
+                            ).show()
                         }
                     }) { Text(if (mediaAccess) "จัดการ" else "อนุญาต") }
                 }

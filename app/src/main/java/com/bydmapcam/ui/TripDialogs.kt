@@ -89,11 +89,14 @@ fun TripStatusCard(
                     text = buildString {
                         append("⏱ ").append(fmtElapsed(now - trip.startTime))
                         append("  ·  ")
+                        // Until a second % reading exists there's nothing measured for THIS trip,
+                        // so say plainly that the figure comes from previous ones.
                         when {
                             measured != null && socTo != null ->
-                                append("%.1f กม./1%% (%d→%d%%)".format(measured, trip.startSoc, socTo))
-                            avgKmPerPercent != null -> append("⌀ %.1f กม./1%%".format(avgKmPerPercent))
-                            else -> append("⌀ — กม./1%")
+                                append("🔋 %.1f กม./1%% (%d→%d%%)".format(measured, trip.startSoc, socTo))
+                            avgKmPerPercent != null ->
+                                append("ทริปก่อน ๆ %.1f กม./1%%".format(avgKmPerPercent))
+                            else -> append("แตะ 🔋 ใส่ % อีกครั้งเพื่อดู กม./1%")
                         }
                     },
                     style = MaterialTheme.typography.bodySmall,

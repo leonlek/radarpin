@@ -41,13 +41,15 @@ fun MediaBar(
             GlyphButton("⏮", onPrevious)
             GlyphButton(if (nowPlaying.playing) "⏸" else "▶", onPlayPause)
             GlyphButton("⏭", onNext)
-            Text(
-                text = nowPlaying.label,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 4.dp, end = 12.dp)
-            )
+            nowPlaying.label?.let { label ->
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 4.dp, end = 12.dp)
+                )
+            }
         }
     }
 }

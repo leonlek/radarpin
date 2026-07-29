@@ -110,14 +110,14 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     val nowPlaying by MediaLink.nowPlaying.collectAsState()
 
     // Watch other apps' media sessions while we're on screen. With notification access we get live
-    // callbacks (title + state); without it, poll the "is music playing" flag so the transport
-    // buttons still show up — it's the only signal available then.
+    // callbacks and the track name; without it we poll for "is media actually playing" so the bar
+    // still appears the moment music starts — just without a title.
     LaunchedEffect(Unit) {
         MediaLink.start(context)
         while (!MediaLink.hasAccess(context)) {
             MediaLink.refreshWithoutAccess(context)
-            delay(3000)
-            MediaLink.start(context) // picks up the moment the user grants access
+            delay(2000)
+            MediaLink.start(context) // picks up the moment access is granted
         }
     }
 
@@ -173,19 +173,34 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                         .padding(start = 6.dp, top = 2.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Live trip panel — takes the top slot, so the speed chip drops under it.
-                    activeTrip?.let { t ->
-                        TripStatusCard(
-                            trip = t,
-                            avgKmPerPercent = avgKmPct,
-                            onSetSoc = { showTripSoc = true },
-                            onFinish = { showTripFinish = true }
-                        )
+                    // On a narrow phone the trip card can't share the top row with the speed and
+                    // the gear, so it stacks under the speed instead.
+                    if (!railBanner) {
+                        activeTrip?.let { t ->
+                            TripStatusCard(
+                                trip = t,
+                                avgKmPerPercent = avgKmPct,
+                                onSetSoc = { showTripSoc = true },
+                                onFinish = { showTripFinish = true }
+                            )
+                        }
                     }
 
                     val simSpeed = sim?.speedKmh
                     if (simSpeed != null) SpeedChip(speedMps = simSpeed / 3.6f)
                     else location?.let { loc -> SpeedChip(speedMps = loc.speed) }
+                }
+
+                if (railBanner) {
+                    activeTrip?.let { t ->
+                        TripStatusCard(
+                            trip = t,
+                            avgKmPerPercent = avgKmPct,
+                            onSetSoc = { showTripSoc = true },
+                            onFinish = { showTripFinish = true },
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
                 }
 
                 SmallFloatingActionButton(
@@ -531,7 +546,7 @@ private fun SimulateDialog(
                 SimRow("📱 การ์ดนอกแอป (กด Home ต่อ)") { onPick(SimScenario.OVERLAY) }
 
                 SimHeader("ส่วนอื่นของแอป")
-                SimRow("🎵 แถบคุมเพลงจากแอปอื่น") { onPick(SimScenario.MEDIA) }
+                SimRow("🎵 แถบเพลง") { onPick(SimScenario.MEDIA) }
                 SimRow("🚗 การ์ดทริป (แบต 85%)") { onPick(SimScenario.TRIP) }
                 SimRow("🧩 ทุกอย่างพร้อมกัน") { onPick(SimScenario.ALL) }
 
@@ -568,7 +583,7 @@ private fun SpeedChip(speedMps: Float, modifier: Modifier = Modifier) {
     val kmh = (speedMps * 3.6f).toInt().coerceAtLeast(0)
     // Tabular figures (tnum) → every digit is the same width, so the number never jitters.
     val numberStyle = TextStyle(
-        color = Color.White,
+        color = MaterialTheme.colorScheme.onPrimaryContainer,
         fontSize = 46.sp,
         fontWeight = FontWeight.Bold,
         fontFeatureSettings = "tnum",
@@ -576,7 +591,7 @@ private fun SpeedChip(speedMps: Float, modifier: Modifier = Modifier) {
     )
     Surface(
         modifier = modifier,
-        color = MaterialTheme.colorScheme.primary,
+        color = MaterialTheme.colorScheme.primaryContainer,
         shape = MaterialTheme.shapes.large,
         shadowElevation = 4.dp
     ) {

@@ -2,11 +2,15 @@ package com.bydmapcam.media
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
+import android.os.Build
+import android.provider.Settings
 import android.view.KeyEvent
 import androidx.core.app.NotificationManagerCompat
 import com.bydmapcam.radio.RadioPlayer
@@ -22,8 +26,8 @@ import kotlinx.coroutines.flow.asStateFlow
  *  - **transport always works** — media key events go to whichever app owns the media session, no
  *    permission needed, exactly like the steering-wheel buttons;
  *  - **the track title needs "notification access"** ([hasAccess]) because that is the only way
- *    Android lets one app read another app's [MediaController]. Without it we can still tell that
- *    *something* is playing ([AudioManager.isMusicActive]) and say so.
+ *    Android lets one app read another app's [MediaController]. Without it the bar still appears
+ *    while media is genuinely playing — just as buttons, with no title.
  *
  * Note this can't reach audio that never becomes an Android media session — most importantly
  * CarPlay, which is a separate projection channel owned by the iPhone.
@@ -34,10 +38,10 @@ object MediaLink {
         val artist: String?,
         val playing: Boolean
     ) {
-        /** One line for the bar: "Title — Artist", or a generic label when we can't read metadata. */
-        val label: String
+        /** One line for the bar, or null when we can't read the track — then it's buttons only. */
+        val label: String?
             get() = when {
-                title.isNullOrBlank() -> "เพลงจากแอปอื่น"
+                title.isNullOrBlank() -> null
                 artist.isNullOrBlank() -> title
                 else -> "$title — $artist"
             }
@@ -64,6 +68,36 @@ object MediaLink {
     fun hasAccess(context: Context): Boolean =
         NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
 
+    /**
+     * Opens the notification-access screen. Car head units are heavily cut-down Android builds and
+     * often don't ship it at all — hence trying the per-app screen, then the list, then Settings
+     * itself, and saying so plainly rather than letting the system throw "not supported" at the user.
+     *
+     * @return false when the device has nowhere to send them.
+     */
+    fun openAccessSettings(context: Context): Boolean {
+        val candidates = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                add(
+                    Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS).putExtra(
+                        Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                        ComponentName(context, MediaNotificationListener::class.java)
+                            .flattenToString()
+                    )
+                )
+            }
+            add(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            add(Intent(Settings.ACTION_SETTINGS))
+        }
+        for (intent in candidates) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            @Suppress("DEPRECATION")
+            if (intent.resolveActivity(context.packageManager) == null) continue
+            if (runCatching { context.startActivity(intent) }.isSuccess) return true
+        }
+        return false
+    }
+
     /** Start watching sessions (safe to call repeatedly — e.g. every time the app resumes). */
     fun start(context: Context) {
         if (!hasAccess(context)) return
@@ -78,24 +112,33 @@ object MediaLink {
         }
     }
 
-    fun stop() {
-        manager?.runCatching { removeOnActiveSessionsChangedListener(sessionsListener) }
-        bind(null)
-    }
-
     /**
-     * Without notification access there is no session to read, so fall back to "is the music stream
-     * busy" — enough to decide whether the bar is worth showing at all. Cheap; poll it, don't spam.
+     * Without notification access there's no session to read, so fall back to asking the audio
+     * system whether anything is *actually* rendering media right now. Deliberately not
+     * [AudioManager.isMusicActive]: a head unit tends to hold a music-stream player open forever,
+     * which made the bar appear the moment the app launched. Checking the active playback
+     * configurations for a real USAGE_MEDIA player is the closest thing to "sound is coming out".
      */
     fun refreshWithoutAccess(context: Context) {
         if (controller != null) return
-        val audio = context.getSystemService(AudioManager::class.java)
-        // Our own radio also lights up isMusicActive — don't offer to "control" ourselves.
+        // Our own radio also counts as playback — don't offer to "control" ourselves.
         val ours = RadioPlayer.state.value != RadioPlayer.State.STOPPED &&
             RadioPlayer.state.value != RadioPlayer.State.ERROR
-        _nowPlaying.value =
-            if (audio?.isMusicActive == true && !ours) NowPlaying(null, null, playing = true)
-            else null
+        val audio = context.getSystemService(AudioManager::class.java)
+        val playing = when {
+            ours || audio == null -> false
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ->
+                audio.activePlaybackConfigurations.any {
+                    it.audioAttributes.usage == AudioAttributes.USAGE_MEDIA
+                }
+            else -> audio.isMusicActive
+        }
+        _nowPlaying.value = if (playing) NowPlaying(null, null, playing = true) else null
+    }
+
+    fun stop() {
+        manager?.runCatching { removeOnActiveSessionsChangedListener(sessionsListener) }
+        bind(null)
     }
 
     /** Prefer whatever is actually playing; otherwise the most recent session. */
