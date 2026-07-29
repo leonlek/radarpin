@@ -1,6 +1,8 @@
 package com.bydmapcam.ui
 
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -29,13 +31,18 @@ fun MediaBar(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        modifier = modifier.widthIn(max = 320.dp),
+        // Matches the height of the radio button it sits above — the two read as one stack.
+        modifier = modifier
+            .widthIn(max = 320.dp)
+            .height(56.dp),
         color = MaterialTheme.colorScheme.secondaryContainer,
         shape = MaterialTheme.shapes.large,
         shadowElevation = 4.dp
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             GlyphButton("⏮", onPrevious)
