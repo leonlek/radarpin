@@ -435,9 +435,9 @@ private fun updatePointSources(
     val active = ArrayList<Feature>()
     val centers = ArrayList<Feature>()
     for (p in points) {
-        // Only hazards get a radius circle. INFO points and POIs are announced by the icon pop
-        // instead, so a ring would be noise around something you're merely driving past.
-        if (p.alertEnabled && !p.infoMode && p.type != PointType.POI) {
+        // Only hazards get a radius circle. Everything else is announced by the icon pop instead,
+        // so a ring would be noise around something you're merely driving past.
+        if (p.alertEnabled && !p.infoMode && !p.type.popsOnly) {
             val poly = Feature.fromGeometry(circlePolygon(p.lat, p.lng, p.radiusM.toDouble()))
                 .apply { addStringProperty("type", p.type.name) }
             if (p.id in activeIds) active.add(poly) else idle.add(poly)

@@ -521,12 +521,12 @@ private fun SimulateDialog(
                 )
                 SimHeader("เตือนตามประเภทจุด")
                 SimRow("🔴 กล้องจับความเร็ว — 350 ม.") { onPick(SimScenario.ALERT_FAR) }
-                SimRow("🟢 ปั๊ม EV — 240 ม.") { onPick(SimScenario.ALERT_EV) }
+                SimRow("🟢 ปั๊ม EV — เด้งไอคอน 150 ม.") { onPick(SimScenario.ALERT_EV) }
                 SimRow("🔵 จุดสนใจ — เด้งไอคอน 130 ม.") { onPick(SimScenario.ALERT_POI) }
 
                 SimHeader("รูปแบบอื่นของการเตือน")
                 SimRow("⚠ ถึงจุดแล้ว (หยุดนับ + สีเข้ม)") { onPick(SimScenario.ALERT_NEAR) }
-                SimRow("⚠ 2 จุดพร้อมกัน (มีบรรทัดถัดไป)") { onPick(SimScenario.ALERT_TWO) }
+                SimRow("⚠ กล้อง 2 ตัวพร้อมกัน (มีบรรทัดถัดไป)") { onPick(SimScenario.ALERT_TWO) }
                 SimRow("ℹ︎ จุดแบบ info (ไอคอนเด้ง ไม่มีแบนเนอร์)") { onPick(SimScenario.INFO_POP) }
                 SimRow("📱 การ์ดนอกแอป (กด Home ต่อ)") { onPick(SimScenario.OVERLAY) }
 

@@ -166,10 +166,11 @@ class LocationService : LifecycleService(), LocationListener {
         for (p in points) {
             if (!p.alertEnabled) continue // points marked "no alert" are shown on the map but never warn
             val d = GeoUtils.distanceMeters(loc.latitude, loc.longitude, p.lat, p.lng)
-            // INFO style — and every POI, which is a place you're passing, not a hazard: no ring,
-            // no beep, no banner. The icon just swells with its details within ~200 m and closes
-            // again once you're past. Distance goes in the same map so the label can count down.
-            if (p.infoMode || p.type == PointType.POI) {
+            // INFO style — and every POI and charger, which are places you're passing, not hazards:
+            // no ring, no beep, no banner. The icon just swells with its details within ~200 m and
+            // closes again once you're past. Distance goes in the same map so the label counts down.
+            // A radius ring is left to mean one thing only: a camera.
+            if (p.infoMode || p.type.popsOnly) {
                 if (d <= INFO_DISTANCE_M) {
                     nowInfo.add(p.id)
                     distances[p.id] = d.toInt()

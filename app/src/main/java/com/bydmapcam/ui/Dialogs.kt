@@ -107,9 +107,9 @@ private fun PointFormDialog(
                     Text("เตือนเมื่อเข้าใกล้", modifier = Modifier.weight(1f))
                     Switch(checked = alertEnabled, onCheckedChange = { alertEnabled = it })
                 }
-                // A POI is somewhere you're passing, not a hazard, so it always uses the pop —
-                // offering a radius and a beep here would promise something the app won't do.
-                val popOnly = type == PointType.POI
+                // Places you pass always use the pop — offering a radius and a beep here would
+                // promise something the app won't do.
+                val popOnly = type.popsOnly
                 if (alertEnabled && popOnly) {
                     Text(
                         "ไม่มีวงรัศมี — ไอคอน+ข้อมูลจะเด้งใหญ่ขึ้นเมื่อเข้าใกล้ ${LocationService.INFO_DISTANCE_M.toInt()} ม. แล้วปิดเองเมื่อผ่านไป",
@@ -381,8 +381,8 @@ private fun distStr(m: Double): String =
 
 fun pointDetail(p: AlertPoint): String = when {
     !p.alertEnabled -> "${p.type.label} • ไม่เตือน"
-    // POIs never ring, so don't describe a radius they don't use.
-    p.infoMode || p.type == PointType.POI ->
+    // These never ring, so don't describe a radius they don't use.
+    p.infoMode || p.type.popsOnly ->
         "${p.type.label} • เด้งไอคอนเมื่อใกล้ ${LocationService.INFO_DISTANCE_M.toInt()} ม."
     else -> "${p.type.label} • เตือน ${p.radiusM} ม. • ${if (p.alertSound) "เสียง" else "เงียบ"}"
 }

@@ -71,7 +71,7 @@ object Simulator {
             label = "เตือน 2 จุดพร้อมกัน",
             points = listOf(
                 fakePoint(ID_A, "กล้องหน้าโรงเรียน", PointType.SPEED_CAMERA, here, 0.0018),
-                fakePoint(ID_B, "ปั๊ม EV บางจาก", PointType.EV_STATION, here, 0.0042)
+                fakePoint(ID_B, "กล้องแยกบ้านดู่", PointType.SPEED_CAMERA, here, 0.0042)
             ),
             activeIds = setOf(ID_A, ID_B),
             distances = mapOf(ID_A to 180, ID_B to 430),
@@ -79,13 +79,13 @@ object Simulator {
         )
     )
 
-    /** A charger ahead — green banner. */
+    /** A charger ahead — pops open on the map like any other place you're passing. */
     fun alertEv(here: Location?) = set(
         State(
-            label = "เตือนปั๊ม EV",
-            points = listOf(fakePoint(ID_A, "ปั๊ม EV บางจาก", PointType.EV_STATION, here, 0.0024)),
-            activeIds = setOf(ID_A),
-            distances = mapOf(ID_A to 240),
+            label = "ปั๊ม EV เด้ง",
+            points = listOf(fakePoint(ID_A, "ปั๊ม EV บางจาก", PointType.EV_STATION, here, 0.0014)),
+            infoIds = setOf(ID_A),
+            distances = mapOf(ID_A to 150),
             speedKmh = 78
         )
     )
@@ -120,8 +120,8 @@ object Simulator {
             label = "ทุกอย่างพร้อมกัน",
             points = listOf(
                 fakePoint(ID_A, "กล้องหน้าโรงเรียน", PointType.SPEED_CAMERA, here, 0.0018),
-                fakePoint(ID_B, "ปั๊ม EV บางจาก", PointType.EV_STATION, here, 0.0042),
-                fakePoint(ID_C, "ทางร่วมทางแยก", PointType.POI, here, 0.0009).copy(infoMode = true)
+                fakePoint(ID_B, "กล้องแยกบ้านดู่", PointType.SPEED_CAMERA, here, 0.0042),
+                fakePoint(ID_C, "ปั๊ม EV บางจาก", PointType.EV_STATION, here, 0.0009)
             ),
             activeIds = setOf(ID_A, ID_B),
             distances = mapOf(ID_A to 180, ID_B to 430, ID_C to 90),

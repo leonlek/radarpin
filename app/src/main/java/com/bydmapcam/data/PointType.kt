@@ -12,9 +12,14 @@ enum class PointType(
     val label: String,
     val defaultAlert: Boolean,
     val alertColor: Long,
-    val alertColorNear: Long
+    val alertColorNear: Long,
+    /**
+     * Places you drive past rather than brake for: they announce themselves by swelling on the map,
+     * never with a ring, a beep or a banner. Only a camera earns those.
+     */
+    val popsOnly: Boolean
 ) {
-    SPEED_CAMERA("กล้องจับความเร็ว", true, 0xFFE53935, 0xFFC1231F),
-    POI("จุดสนใจ", false, 0xFF1565C0, 0xFF0D3F87),
-    EV_STATION("ปั๊ม EV", false, 0xFF2E7D32, 0xFF1B5A1F)
+    SPEED_CAMERA("กล้องจับความเร็ว", true, 0xFFE53935, 0xFFC1231F, popsOnly = false),
+    POI("จุดสนใจ", false, 0xFF1565C0, 0xFF0D3F87, popsOnly = true),
+    EV_STATION("ปั๊ม EV", false, 0xFF2E7D32, 0xFF1B5A1F, popsOnly = true)
 }
