@@ -38,6 +38,13 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.style.TextOverflow
+import com.bydmapcam.sim.Simulator
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
@@ -52,20 +59,36 @@ import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.data.Trip
 import com.bydmapcam.data.avgKmPerPercent
 import com.bydmapcam.location.LocationBus
+import com.bydmapcam.location.LocationService
 import com.bydmapcam.media.MediaLink
 import com.bydmapcam.radio.RadioPlayer
 import com.bydmapcam.settings.Settings
 import com.bydmapcam.trip.TripTracker
 import kotlinx.coroutines.delay
 
+/** Below this width the alert has to stay a full-width bar; above it, it becomes a side panel. */
+private const val RAIL_MIN_WIDTH_DP = 600
+
 @Composable
 fun MapScreen(vm: MapViewModel = viewModel()) {
     val context = LocalContext.current
-    val points by vm.points.collectAsState()
+    val realPoints by vm.points.collectAsState()
     val location by LocationBus.location.collectAsState()
-    val activeIds by LocationBus.activeAlertIds.collectAsState()
+    val realActiveIds by LocationBus.activeAlertIds.collectAsState()
     val infoActiveIds by LocationBus.infoActiveIds.collectAsState()
-    val alertDistances by LocationBus.alertDistances.collectAsState()
+    val realDistances by LocationBus.alertDistances.collectAsState()
+
+    // The simulator lays fake state over the live one (emulator only) so every alert style can be
+    // seen without driving. Nothing below needs to know which of the two it's rendering.
+    val sim by Simulator.state.collectAsState()
+    var showSim by remember { mutableStateOf(false) }
+    val points = remember(realPoints, sim) { sim?.let { realPoints + it.points } ?: realPoints }
+    val activeIds = sim?.activeIds ?: realActiveIds
+    val alertDistances = sim?.distances ?: realDistances
+
+    // A wide screen (head unit, or a phone turned sideways) has room for the alert as a side panel;
+    // a portrait phone doesn't, so it keeps the full-width bar.
+    val railBanner = LocalConfiguration.current.screenWidthDp >= RAIL_MIN_WIDTH_DP
 
     // Coordinates for a pending "save point" dialog — from the FAB (current location) or a map long-press.
     var pendingSave by remember { mutableStateOf<Pair<Double, Double>?>(null) }
@@ -152,7 +175,9 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                         )
                     }
 
-                    location?.let { loc -> SpeedChip(speedMps = loc.speed) }
+                    val simSpeed = sim?.speedKmh
+                    if (simSpeed != null) SpeedChip(speedMps = simSpeed / 3.6f)
+                    else location?.let { loc -> SpeedChip(speedMps = loc.speed) }
                 }
 
                 SmallFloatingActionButton(
@@ -172,14 +197,23 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 AlertBanner(
                     points = activePoints,
                     distances = alertDistances,
+                    rail = railBanner,
                     onSelect = { p ->
                         selectedPoint = p
                         focus = p.lat to p.lng
                     },
                     onDismiss = { bannerDismissed = activeIds },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp)
+                    modifier = if (railBanner) {
+                        // Clear of the right-hand button column, which reaches up this far on a
+                        // tall head-unit screen.
+                        Modifier
+                            .align(Alignment.End)
+                            .padding(end = 64.dp)
+                    } else {
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp)
+                    }
                 )
             }
         }
@@ -193,6 +227,14 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
             horizontalAlignment = Alignment.End
         ) {
+            if (Simulator.isEmulator) {
+                SmallFloatingActionButton(
+                    onClick = { showSim = true },
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                ) {
+                    Text("จำลอง", fontSize = 11.sp)
+                }
+            }
             SmallFloatingActionButton(onClick = { recenterTick++ }) {
                 LocateIcon(color = MaterialTheme.colorScheme.onPrimaryContainer)
             }
@@ -221,7 +263,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 40.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            nowPlaying?.let { np ->
+            (sim?.nowPlaying ?: nowPlaying)?.let { np ->
                 MediaBar(
                     nowPlaying = np,
                     onPrevious = { MediaLink.previous(context) },
@@ -408,6 +450,68 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     if (showOffline) {
         OfflineMapsDialog(onDismiss = { showOffline = false })
     }
+
+    if (showSim) {
+        SimulateDialog(
+            active = sim?.label,
+            onPick = { scenario ->
+                when (scenario) {
+                    SimScenario.ALERT_FAR -> Simulator.alertFar(location)
+                    SimScenario.ALERT_NEAR -> Simulator.alertNear(location)
+                    SimScenario.ALERT_TWO -> Simulator.alertTwo(location)
+                    SimScenario.OVERLAY -> LocationService.simulateOverlay(context)
+                    SimScenario.MEDIA -> Simulator.media()
+                    SimScenario.TRIP -> vm.startTrip(85)
+                    SimScenario.OFF -> {
+                        Simulator.clear()
+                        LocationService.clearSimulatedOverlay(context)
+                        vm.cancelTrip()
+                    }
+                }
+                bannerDismissed = emptySet()
+                showSim = false
+            },
+            onDismiss = { showSim = false }
+        )
+    }
+}
+
+enum class SimScenario { ALERT_FAR, ALERT_NEAR, ALERT_TWO, OVERLAY, MEDIA, TRIP, OFF }
+
+/** Emulator-only shortcut list for putting the UI into each state worth looking at. */
+@Composable
+private fun SimulateDialog(
+    active: String?,
+    onPick: (SimScenario) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("ปิด") } },
+        title = { Text("จำลองสถานการณ์") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = active?.let { "กำลังจำลอง: $it" } ?: "ใช้ดูหน้าตาแต่ละแบบโดยไม่ต้องออกไปขับ",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                SimRow("⚠ เตือนไกล — 350 ม.") { onPick(SimScenario.ALERT_FAR) }
+                SimRow("⚠ ถึงจุดเตือนแล้ว") { onPick(SimScenario.ALERT_NEAR) }
+                SimRow("⚠ เตือน 2 จุดพร้อมกัน") { onPick(SimScenario.ALERT_TWO) }
+                SimRow("📱 แบนเนอร์นอกแอป (กด Home ต่อ)") { onPick(SimScenario.OVERLAY) }
+                SimRow("🎵 แถบเพลงจากแอปอื่น") { onPick(SimScenario.MEDIA) }
+                SimRow("🚗 เริ่มทริป (แบต 85%)") { onPick(SimScenario.TRIP) }
+                SimRow("■ หยุดจำลองทั้งหมด") { onPick(SimScenario.OFF) }
+            }
+        }
+    )
+}
+
+@Composable
+private fun SimRow(label: String, onClick: () -> Unit) {
+    TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Text(label, modifier = Modifier.fillMaxWidth())
+    }
 }
 
 @Composable
@@ -443,10 +547,15 @@ private fun SpeedChip(speedMps: Float, modifier: Modifier = Modifier) {
 private fun AlertBanner(
     points: List<AlertPoint>,
     distances: Map<Long, Int>,
+    rail: Boolean,
     onSelect: (AlertPoint) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    if (rail) {
+        AlertRail(points, distances, onSelect, onDismiss, modifier)
+        return
+    }
     // Highlight the nearest point's distance big in the header (live countdown, floored at 100 m).
     val nearest = points.mapNotNull { distances[it.id] }.minOrNull()
     val header = when {
@@ -483,6 +592,111 @@ private fun AlertBanner(
             }
             TextButton(onClick = onDismiss) {
                 Text("✕", color = Color.White, fontSize = 20.sp)
+            }
+        }
+    }
+}
+
+/**
+ * Side panel for wide screens: the distance is the headline because that's the one number a driver
+ * needs off a glance, and it lives on the right edge where it covers neither the speed nor the road
+ * ahead in the middle of the map.
+ */
+@Composable
+private fun AlertRail(
+    points: List<AlertPoint>,
+    distances: Map<Long, Int>,
+    onSelect: (AlertPoint) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val sorted = points.sortedBy { distances[it.id] ?: Int.MAX_VALUE }
+    val lead = sorted.first()
+    val leadDistance = distances[lead.id]
+    Surface(
+        onClick = { onSelect(lead) },
+        modifier = modifier.width(232.dp),
+        color = Color(if (leadDistance != null && leadDistance < AlertFormat.FLOOR_M) 0xFFD32220 else 0xFFE53935),
+        shape = MaterialTheme.shapes.large,
+        shadowElevation = 6.dp
+    ) {
+        Column(Modifier.padding(start = 16.dp, top = 10.dp, end = 10.dp, bottom = 14.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Text(
+                    text = lead.type.label,
+                    color = Color.White.copy(alpha = .88f),
+                    style = MaterialTheme.typography.labelMedium,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.weight(1f).padding(top = 6.dp)
+                )
+                TextButton(
+                    onClick = onDismiss,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text("✕", color = Color.White, fontSize = 18.sp)
+                }
+            }
+
+            if (leadDistance != null && leadDistance >= AlertFormat.FLOOR_M) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = "$leadDistance",
+                        color = Color.White,
+                        fontSize = 52.sp,
+                        fontWeight = FontWeight.Bold,
+                        style = TextStyle(fontFeatureSettings = "tnum"),
+                        lineHeight = 54.sp
+                    )
+                    Text(
+                        text = " ม.",
+                        color = Color.White.copy(alpha = .9f),
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(bottom = 7.dp)
+                    )
+                }
+            } else {
+                Text(
+                    text = "ถึงจุดแล้ว",
+                    color = Color.White,
+                    fontSize = 38.sp,
+                    fontWeight = FontWeight.Bold,
+                    lineHeight = 44.sp
+                )
+            }
+
+            Text(
+                text = lead.name,
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            // Only ever one line about what's behind it — a list would be unreadable at speed.
+            sorted.getOrNull(1)?.let { next ->
+                HorizontalDivider(
+                    color = Color.White.copy(alpha = .3f),
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+                Row {
+                    Text(
+                        text = "ถัดไป · ${next.name}",
+                        color = Color.White.copy(alpha = .9f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    distances[next.id]?.let {
+                        Text(
+                            text = "  $it ม.",
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
             }
         }
     }

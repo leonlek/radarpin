@@ -19,6 +19,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import android.graphics.PixelFormat
+import android.graphics.Typeface
+import android.text.TextUtils
+import android.util.TypedValue
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
@@ -34,8 +37,12 @@ import com.bydmapcam.alert.Speaker
 import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.data.PointRepository
 import com.bydmapcam.settings.Settings
+import com.bydmapcam.ui.CarUi
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+
+private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 
 /** Foreground service that tracks GPS and beeps when the car enters a saved point's radius. */
 class LocationService : LifecycleService(), LocationListener {
@@ -48,8 +55,15 @@ class LocationService : LifecycleService(), LocationListener {
     private var insideIds: Set<Long> = emptySet()
     private var lastLocation: Location? = null
     private var overlayView: View? = null
-    private var overlayLabel: TextView? = null
+    private var overlayType: TextView? = null
+    private var overlayDistance: TextView? = null
+    private var overlayName: TextView? = null
+    private var overlayNext: TextView? = null
     private var overlayDismissedFor: Set<Long> = emptySet()
+
+    /** Fake card pushed in from the simulator so the over-other-apps look can be checked at a desk. */
+    @Volatile
+    private var simOverlay: OverlayContent? = null
 
     /** When the car first stopped in the current stretch (0 = it's moving). */
     private var stationarySince = 0L
@@ -78,6 +92,21 @@ class LocationService : LifecycleService(), LocationListener {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         startAsForeground()
+        when (intent?.action) {
+            ACTION_SIM_OVERLAY -> {
+                simOverlay = OverlayContent(
+                    type = "กล้องจับความเร็ว",
+                    distance = "180 ม.",
+                    name = "กล้องหน้าโรงเรียน",
+                    next = "ถัดไป · ปั๊ม EV บางจาก   430 ม."
+                )
+                updateOverlay()
+            }
+            ACTION_SIM_CLEAR -> {
+                simOverlay = null
+                updateOverlay()
+            }
+        }
         requestUpdates()
         return START_STICKY
     }
@@ -211,28 +240,47 @@ class LocationService : LifecycleService(), LocationListener {
         else -> ((d / 10).toInt() * 10).coerceAtLeast(10)
     }
 
-    /** Floating red banner drawn over other apps while backgrounded and inside an alert. */
+    /** What the floating card says — the same shape of information as the in-app rail. */
+    private data class OverlayContent(
+        val type: String,
+        val distance: String,
+        val name: String,
+        val next: String?
+    )
+
+    /** Floating red card drawn over other apps while backgrounded and inside an alert. */
     private fun updateOverlay() {
         val active = insideIds
         if (active.isEmpty()) overlayDismissedFor = emptySet()
+        val content = simOverlay ?: liveOverlayContent()
         val show = Settings.overlayEnabled(this) &&
             Settings.canDrawOverlays(this) &&
-            active.isNotEmpty() &&
+            content != null &&
             !AppState.inForeground.value &&
-            active != overlayDismissedFor
+            (simOverlay != null || active != overlayDismissedFor)
         if (!show) {
             hideOverlay()
             return
         }
+        showOverlay(content!!)
+    }
+
+    private fun liveOverlayContent(): OverlayContent? {
+        val active = insideIds
+        if (active.isEmpty()) return null
         val dist = LocationBus.alertDistances.value
-        val names = points.filter { it.id in active }
-            .take(3)
-            .joinToString("\n") { p ->
-                val dm = dist[p.id]
-                if (dm != null) "• ${p.name} — ${AlertFormat.countdown(dm)}"
-                else "• ${p.name} (${p.type.label})"
+        val sorted = points.filter { it.id in active }
+            .sortedBy { dist[it.id] ?: Int.MAX_VALUE }
+        val lead = sorted.firstOrNull() ?: return null
+        val leadDistance = dist[lead.id]
+        return OverlayContent(
+            type = lead.type.label,
+            distance = leadDistance?.let { AlertFormat.countdown(it) } ?: "ใกล้จุดเตือน",
+            name = lead.name,
+            next = sorted.getOrNull(1)?.let { n ->
+                "ถัดไป · ${n.name}" + (dist[n.id]?.let { "   $it ม." } ?: "")
             }
-        showOverlay("⚠ ใกล้จุดเตือน — แตะเพื่อเปิดแอป\n$names")
+        )
     }
 
     private fun openApp() {
@@ -247,39 +295,81 @@ class LocationService : LifecycleService(), LocationListener {
     /** Hide the banner for the current alert without opening the app. */
     private fun dismissOverlay() {
         overlayDismissedFor = insideIds
+        simOverlay = null
         hideOverlay()
     }
 
-    private fun showOverlay(message: String) {
+    /**
+     * Same card as the in-app rail, but built out of plain views because a service has no Compose
+     * tree — and scaled here by hand, since the activity's density trick doesn't reach this window.
+     */
+    private fun showOverlay(content: OverlayContent) {
         val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val scale = CarUi.scale
         val density = resources.displayMetrics.density
-        fun dp(value: Int) = (value * density).toInt()
+        fun dp(value: Int) = (value * density * scale).toInt()
+        fun sp(value: Float) = value * scale
+
         if (overlayView == null) {
-            val label = TextView(this).apply {
-                setTextColor(0xFFFFFFFF.toInt())
-                textSize = 16f
-                // Cap the width so it stays a compact card instead of a full-screen bar
-                // (matters most on the car's wide landscape screen).
-                maxWidth = dp(340)
-                setOnClickListener { openApp() }
+            val typeView = TextView(this).apply {
+                setTextColor(0xE0FFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(13f))
             }
             val dismiss = TextView(this).apply {
                 text = "✕"
                 setTextColor(0xFFFFFFFF.toInt())
-                textSize = 20f
-                setPadding(dp(14), dp(2), dp(6), dp(2))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(20f))
+                setPadding(dp(16), 0, dp(4), dp(4))
                 setOnClickListener { dismissOverlay() }
             }
-            val root = LinearLayout(this).apply {
+            val header = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(18), dp(12), dp(12), dp(12))
+                gravity = Gravity.TOP
+                addView(
+                    typeView,
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                )
+                addView(dismiss)
+            }
+            val distanceView = TextView(this).apply {
+                setTextColor(0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(40f))
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                includeFontPadding = false
+            }
+            val nameView = TextView(this).apply {
+                setTextColor(0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(18f))
+                maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
+            }
+            val nextView = TextView(this).apply {
+                setTextColor(0xD8FFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(14f))
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                setPadding(0, dp(8), 0, 0)
+            }
+            val hint = TextView(this).apply {
+                text = "แตะเพื่อเปิดแอป"
+                setTextColor(0xB0FFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(12f))
+                setPadding(0, dp(6), 0, 0)
+            }
+            val root = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(18), dp(10), dp(12), dp(14))
                 background = GradientDrawable().apply {
                     setColor(0xF0E53935.toInt())
-                    cornerRadius = dp(18).toFloat()
+                    cornerRadius = dp(20).toFloat()
                 }
-                addView(label, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-                addView(dismiss, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                // Whole card opens the app; only the ✕ swallows its own tap.
+                setOnClickListener { openApp() }
+                addView(header, LinearLayout.LayoutParams(MATCH, WRAP))
+                addView(distanceView)
+                addView(nameView)
+                addView(nextView)
+                addView(hint)
             }
             val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -288,7 +378,7 @@ class LocationService : LifecycleService(), LocationListener {
                 WindowManager.LayoutParams.TYPE_PHONE
             }
             val lp = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
+                dp(240),
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 type,
                 // Touchable card (tap = open, ✕ = dismiss); touches outside it pass to the app behind.
@@ -296,20 +386,34 @@ class LocationService : LifecycleService(), LocationListener {
                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT
             ).apply {
-                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                // Mirrors where the rail sits inside the app.
+                gravity = Gravity.TOP or Gravity.END
+                x = dp(16)
                 y = dp(24)
             }
             overlayView = root
-            overlayLabel = label
+            overlayType = typeView
+            overlayDistance = distanceView
+            overlayName = nameView
+            overlayNext = nextView
             runCatching { wm.addView(root, lp) }
         }
-        overlayLabel?.text = message
+        overlayType?.text = content.type
+        overlayDistance?.text = content.distance
+        overlayName?.text = content.name
+        overlayNext?.apply {
+            text = content.next.orEmpty()
+            visibility = if (content.next == null) View.GONE else View.VISIBLE
+        }
     }
 
     private fun hideOverlay() {
         val v = overlayView ?: return
         overlayView = null
-        overlayLabel = null
+        overlayType = null
+        overlayDistance = null
+        overlayName = null
+        overlayNext = null
         runCatching { (getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(v) }
     }
 
@@ -359,6 +463,21 @@ class LocationService : LifecycleService(), LocationListener {
         private const val PARKED_AFTER_MS = 120_000L // stopped this long = parked -> mute alerts
         private const val STATE_PREF = "alert_state"
         private const val KEY_PARKED = "parked"
+
+        private const val ACTION_SIM_OVERLAY = "com.bydmapcam.SIM_OVERLAY"
+        private const val ACTION_SIM_CLEAR = "com.bydmapcam.SIM_CLEAR"
+
+        /** Show a demo card, so pressing Home reveals exactly what the driver would see. */
+        fun simulateOverlay(context: Context) = send(context, ACTION_SIM_OVERLAY)
+
+        fun clearSimulatedOverlay(context: Context) = send(context, ACTION_SIM_CLEAR)
+
+        private fun send(context: Context, action: String) {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, LocationService::class.java).setAction(action)
+            )
+        }
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, LocationService::class.java))
