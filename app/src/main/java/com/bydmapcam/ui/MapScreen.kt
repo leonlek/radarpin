@@ -38,6 +38,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
@@ -75,7 +77,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     val realPoints by vm.points.collectAsState()
     val location by LocationBus.location.collectAsState()
     val realActiveIds by LocationBus.activeAlertIds.collectAsState()
-    val infoActiveIds by LocationBus.infoActiveIds.collectAsState()
+    val realInfoIds by LocationBus.infoActiveIds.collectAsState()
     val realDistances by LocationBus.alertDistances.collectAsState()
 
     // The simulator lays fake state over the live one (emulator only) so every alert style can be
@@ -84,6 +86,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     var showSim by remember { mutableStateOf(false) }
     val points = remember(realPoints, sim) { sim?.let { realPoints + it.points } ?: realPoints }
     val activeIds = sim?.activeIds ?: realActiveIds
+    val infoActiveIds = sim?.infoIds ?: realInfoIds
     val alertDistances = sim?.distances ?: realDistances
 
     // A wide screen (head unit, or a phone turned sideways) has room for the alert as a side panel;
@@ -95,6 +98,8 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     var showList by remember { mutableStateOf(false) }
     var editingPoint by remember { mutableStateOf<AlertPoint?>(null) }
     var recenterTick by remember { mutableIntStateOf(0) }
+    var zoomInTick by remember { mutableIntStateOf(0) }
+    var zoomOutTick by remember { mutableIntStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
     var showOffline by remember { mutableStateOf(false) }
     var selectedPoint by remember { mutableStateOf<AlertPoint?>(null) }
@@ -135,7 +140,10 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             location = location,
             activeIds = activeIds,
             infoActiveIds = infoActiveIds,
+            distances = alertDistances,
             recenterTick = recenterTick,
+            zoomInTick = zoomInTick,
+            zoomOutTick = zoomOutTick,
             onMapLongClick = { lat, lng -> pendingSave = lat to lng },
             onMarkerClick = { id ->
                 points.find { it.id == id }?.let {
@@ -234,6 +242,12 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 ) {
                     Text("จำลอง", fontSize = 11.sp)
                 }
+            }
+            SmallFloatingActionButton(onClick = { zoomInTick++ }) {
+                Text("+", fontSize = 22.sp)
+            }
+            SmallFloatingActionButton(onClick = { zoomOutTick++ }) {
+                Text("−", fontSize = 22.sp)
             }
             SmallFloatingActionButton(onClick = { recenterTick++ }) {
                 LocateIcon(color = MaterialTheme.colorScheme.onPrimaryContainer)
@@ -458,7 +472,14 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 when (scenario) {
                     SimScenario.ALERT_FAR -> Simulator.alertFar(location)
                     SimScenario.ALERT_NEAR -> Simulator.alertNear(location)
+                    SimScenario.ALERT_EV -> Simulator.alertEv(location)
+                    SimScenario.ALERT_POI -> Simulator.alertPoi(location)
                     SimScenario.ALERT_TWO -> Simulator.alertTwo(location)
+                    SimScenario.INFO_POP -> Simulator.infoPop(location)
+                    SimScenario.ALL -> {
+                        Simulator.everything(location)
+                        if (TripTracker.active.value == null) vm.startTrip(85)
+                    }
                     SimScenario.OVERLAY -> LocationService.simulateOverlay(context)
                     SimScenario.MEDIA -> Simulator.media()
                     SimScenario.TRIP -> vm.startTrip(85)
@@ -476,7 +497,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     }
 }
 
-enum class SimScenario { ALERT_FAR, ALERT_NEAR, ALERT_TWO, OVERLAY, MEDIA, TRIP, OFF }
+enum class SimScenario { ALERT_FAR, ALERT_EV, ALERT_POI, ALERT_NEAR, ALERT_TWO, INFO_POP, OVERLAY, MEDIA, TRIP, ALL, OFF }
 
 /** Emulator-only shortcut list for putting the UI into each state worth looking at. */
 @Composable
@@ -490,21 +511,49 @@ private fun SimulateDialog(
         confirmButton = { TextButton(onClick = onDismiss) { Text("ปิด") } },
         title = { Text("จำลองสถานการณ์") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
                 Text(
                     text = active?.let { "กำลังจำลอง: $it" } ?: "ใช้ดูหน้าตาแต่ละแบบโดยไม่ต้องออกไปขับ",
                     style = MaterialTheme.typography.bodySmall
                 )
-                SimRow("⚠ เตือนไกล — 350 ม.") { onPick(SimScenario.ALERT_FAR) }
-                SimRow("⚠ ถึงจุดเตือนแล้ว") { onPick(SimScenario.ALERT_NEAR) }
-                SimRow("⚠ เตือน 2 จุดพร้อมกัน") { onPick(SimScenario.ALERT_TWO) }
-                SimRow("📱 แบนเนอร์นอกแอป (กด Home ต่อ)") { onPick(SimScenario.OVERLAY) }
-                SimRow("🎵 แถบเพลงจากแอปอื่น") { onPick(SimScenario.MEDIA) }
-                SimRow("🚗 เริ่มทริป (แบต 85%)") { onPick(SimScenario.TRIP) }
+                SimHeader("เตือนตามประเภทจุด")
+                SimRow("🔴 กล้องจับความเร็ว — 350 ม.") { onPick(SimScenario.ALERT_FAR) }
+                SimRow("🟢 ปั๊ม EV — 240 ม.") { onPick(SimScenario.ALERT_EV) }
+                SimRow("🔵 จุดสนใจ — เด้งไอคอน 130 ม.") { onPick(SimScenario.ALERT_POI) }
+
+                SimHeader("รูปแบบอื่นของการเตือน")
+                SimRow("⚠ ถึงจุดแล้ว (หยุดนับ + สีเข้ม)") { onPick(SimScenario.ALERT_NEAR) }
+                SimRow("⚠ 2 จุดพร้อมกัน (มีบรรทัดถัดไป)") { onPick(SimScenario.ALERT_TWO) }
+                SimRow("ℹ︎ จุดแบบ info (ไอคอนเด้ง ไม่มีแบนเนอร์)") { onPick(SimScenario.INFO_POP) }
+                SimRow("📱 การ์ดนอกแอป (กด Home ต่อ)") { onPick(SimScenario.OVERLAY) }
+
+                SimHeader("ส่วนอื่นของแอป")
+                SimRow("🎵 แถบคุมเพลงจากแอปอื่น") { onPick(SimScenario.MEDIA) }
+                SimRow("🚗 การ์ดทริป (แบต 85%)") { onPick(SimScenario.TRIP) }
+                SimRow("🧩 ทุกอย่างพร้อมกัน") { onPick(SimScenario.ALL) }
+
+                SimHeader("")
                 SimRow("■ หยุดจำลองทั้งหมด") { onPick(SimScenario.OFF) }
             }
         }
     )
+}
+
+@Composable
+private fun SimHeader(text: String) {
+    if (text.isNotEmpty()) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 10.dp, bottom = 2.dp)
+        )
+    } else {
+        HorizontalDivider(Modifier.padding(vertical = 6.dp))
+    }
 }
 
 @Composable
@@ -569,7 +618,7 @@ private fun AlertBanner(
     Surface(
         onClick = { onSelect(nearestPoint) },
         modifier = modifier,
-        color = Color(0xFFE53935),
+        color = Color(nearestPoint.type.alertColor),
         shape = MaterialTheme.shapes.medium,
         shadowElevation = 6.dp
     ) {
@@ -616,7 +665,10 @@ private fun AlertRail(
     Surface(
         onClick = { onSelect(lead) },
         modifier = modifier.width(232.dp),
-        color = Color(if (leadDistance != null && leadDistance < AlertFormat.FLOOR_M) 0xFFD32220 else 0xFFE53935),
+        color = Color(
+            if (leadDistance != null && leadDistance < AlertFormat.FLOOR_M) lead.type.alertColorNear
+            else lead.type.alertColor
+        ),
         shape = MaterialTheme.shapes.large,
         shadowElevation = 6.dp
     ) {

@@ -18,6 +18,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +34,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleEventObserver
 import com.bydmapcam.R
 import com.bydmapcam.data.AlertPoint
+import com.bydmapcam.data.PointType
 import com.bydmapcam.location.AppState
 import com.bydmapcam.offline.MapCamera
 import org.maplibre.android.camera.CameraPosition
@@ -70,13 +72,22 @@ private const val SRC_ME = "src-me"
 // between fixes instead of hopping. Linear easing (see easeCamera(..., false)).
 private const val FOLLOW_ANIM_MS = 1000
 
+/** How far off a point a tap can land and still count — a fingertip, not a mouse pointer. */
+private const val TAP_SLOP_DP = 26f
+
+/** A point currently popped open on the map, with the distance its label is counting down. */
+private data class InfoPop(val point: AlertPoint, val distanceM: Int?)
+
 @Composable
 fun MapLibreMap(
     points: List<AlertPoint>,
     location: Location?,
     activeIds: Set<Long>,
     infoActiveIds: Set<Long>,
+    distances: Map<Long, Int>,
     recenterTick: Int,
+    zoomInTick: Int,
+    zoomOutTick: Int,
     onMapLongClick: (lat: Double, lng: Double) -> Unit,
     onMarkerClick: (id: Long) -> Unit,
     focus: Pair<Double, Double>?,
@@ -84,6 +95,11 @@ fun MapLibreMap(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    // The map's listeners are registered once, when the map is created, so a plain lambda would
+    // freeze that first composition's captures forever — including an empty points list, which is
+    // why tapping a point saved after launch did nothing at all.
+    val onMarkerClickNow by rememberUpdatedState(onMarkerClick)
+    val onMapLongClickNow by rememberUpdatedState(onMapLongClick)
     val density = LocalDensity.current
     val navBarInsetPx = WindowInsets.navigationBars.getBottom(density)
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -135,17 +151,21 @@ fun MapLibreMap(
                 }
                 // Long-press anywhere to add a point at that map location.
                 m.addOnMapLongClickListener { latLng ->
-                    onMapLongClick(latLng.latitude, latLng.longitude)
+                    onMapLongClickNow(latLng.latitude, latLng.longitude)
                     true
                 }
-                // Tap a marker to focus it + show info.
+                // Tap a point to focus it + show info. The hit box is in *pixels*, so it has to be
+                // derived from the density — a fixed 22 px was barely 7 dp on a phone, which is why
+                // markers were so fiddly to hit. INFO points are queried too; they're a separate
+                // layer and used to ignore taps entirely.
                 m.addOnMapClickListener { latLng ->
                     val screen = m.projection.toScreenLocation(latLng)
-                    val box = RectF(screen.x - 22f, screen.y - 22f, screen.x + 22f, screen.y + 22f)
-                    val hitId = m.queryRenderedFeatures(box, "lyr-markers")
+                    val slop = TAP_SLOP_DP * context.resources.displayMetrics.density
+                    val box = RectF(screen.x - slop, screen.y - slop, screen.x + slop, screen.y + slop)
+                    val hitId = m.queryRenderedFeatures(box, "lyr-markers", "lyr-info")
                         .firstOrNull()?.getNumberProperty("id")?.toLong()
                     if (hitId != null) {
-                        onMarkerClick(hitId)
+                        onMarkerClickNow(hitId)
                         true
                     } else {
                         false
@@ -168,11 +188,16 @@ fun MapLibreMap(
         updatePointSources(s, points, activeIds)
     }
 
-    // INFO pop: enlarged icon+name for INFO points currently within ~200 m (small, updates ~per second).
-    LaunchedEffect(infoActiveIds, points, style, inForeground) {
+    // INFO pop: enlarged icon + details for points currently within ~200 m. The distance is rounded
+    // to 10 m so the source is only rewritten when the label text really changes, not every fix.
+    val popped = remember(points, infoActiveIds, distances) {
+        points.filter { it.id in infoActiveIds }
+            .map { InfoPop(it, distances[it.id]?.let { d -> (d / 10) * 10 }) }
+    }
+    LaunchedEffect(popped, style, inForeground) {
         val s = style ?: return@LaunchedEffect
         if (!inForeground) return@LaunchedEffect
-        updateInfoSource(s, points, infoActiveIds)
+        updateInfoSource(s, popped)
     }
 
     // Me arrow + camera. Skip entirely while backgrounded (map not visible) to save CPU/battery.
@@ -215,6 +240,14 @@ fun MapLibreMap(
         m.uiSettings.setLogoMargins(pad, 0, 0, bottom)
         // Sits clear of the ~93 dp wide MapLibre wordmark so the two don't overlap.
         m.uiSettings.setAttributionMargins(with(density) { 104.dp.roundToPx() }, 0, 0, bottom)
+    }
+
+    // Zoom buttons — same one-step-per-tap as the map's own gesture, but reachable with a thumb.
+    LaunchedEffect(zoomInTick) {
+        if (zoomInTick > 0) map?.animateCamera(CameraUpdateFactory.zoomIn())
+    }
+    LaunchedEffect(zoomOutTick) {
+        if (zoomOutTick > 0) map?.animateCamera(CameraUpdateFactory.zoomOut())
     }
 
     // Snap the map back to north-up when heading-up is turned off.
@@ -266,6 +299,18 @@ fun MapLibreMap(
     }
 }
 
+/** Data-driven colour so one layer can serve every point type. */
+private fun alertColorByType(): Expression = Expression.match(
+    Expression.get("type"),
+    Expression.literal(PointType.EV_STATION.name),
+    Expression.literal(colorHex(PointType.EV_STATION.alertColor)),
+    Expression.literal(PointType.POI.name),
+    Expression.literal(colorHex(PointType.POI.alertColor)),
+    Expression.literal(colorHex(PointType.SPEED_CAMERA.alertColor))
+)
+
+private fun colorHex(argb: Long): String = "#%06X".format(argb and 0xFFFFFF)
+
 private fun setupLayers(style: Style) {
     style.addSource(GeoJsonSource(SRC_IDLE))
     style.addLayer(
@@ -281,16 +326,17 @@ private fun setupLayers(style: Style) {
         )
     )
 
+    // The live ring matches its banner, so a green card never sits over a red circle.
     style.addSource(GeoJsonSource(SRC_ACTIVE))
     style.addLayer(
         FillLayer("lyr-active-fill", SRC_ACTIVE).withProperties(
-            PropertyFactory.fillColor(android.graphics.Color.parseColor("#E53935")),
+            PropertyFactory.fillColor(alertColorByType()),
             PropertyFactory.fillOpacity(0.28f)
         )
     )
     style.addLayer(
         LineLayer("lyr-active-line", SRC_ACTIVE).withProperties(
-            PropertyFactory.lineColor(android.graphics.Color.parseColor("#E53935")),
+            PropertyFactory.lineColor(alertColorByType()),
             PropertyFactory.lineWidth(2f)
         )
     )
@@ -335,15 +381,16 @@ private fun setupLayers(style: Style) {
                 )
             ),
             PropertyFactory.iconAllowOverlap(true),
-            PropertyFactory.iconSize(1.7f),
+            PropertyFactory.iconSize(2.0f),
             PropertyFactory.textField(Expression.get("name")),
             PropertyFactory.textFont(arrayOf("Noto Sans Regular")),
-            PropertyFactory.textSize(15f),
+            PropertyFactory.textSize(14f),
             PropertyFactory.textColor(android.graphics.Color.parseColor("#0D47A1")),
             PropertyFactory.textHaloColor(android.graphics.Color.WHITE),
             PropertyFactory.textHaloWidth(2f),
             PropertyFactory.textAnchor(Property.TEXT_ANCHOR_TOP),
-            PropertyFactory.textOffset(arrayOf(0f, 1.3f)),
+            PropertyFactory.textOffset(arrayOf(0f, 1.2f)),
+            PropertyFactory.textLineHeight(1.25f),
             PropertyFactory.textAllowOverlap(true)
         )
     )
@@ -388,9 +435,11 @@ private fun updatePointSources(
     val active = ArrayList<Feature>()
     val centers = ArrayList<Feature>()
     for (p in points) {
-        // Standard-alert points get a radius circle; INFO and non-alerting points do not.
-        if (p.alertEnabled && !p.infoMode) {
+        // Only hazards get a radius circle. INFO points and POIs are announced by the icon pop
+        // instead, so a ring would be noise around something you're merely driving past.
+        if (p.alertEnabled && !p.infoMode && p.type != PointType.POI) {
             val poly = Feature.fromGeometry(circlePolygon(p.lat, p.lng, p.radiusM.toDouble()))
+                .apply { addStringProperty("type", p.type.name) }
             if (p.id in activeIds) active.add(poly) else idle.add(poly)
         }
         centers.add(
@@ -424,15 +473,24 @@ private fun updateMeSource(
     style.getSourceAs<GeoJsonSource>(SRC_ME)?.setGeoJson(meFeature)
 }
 
-private fun updateInfoSource(style: Style, points: List<AlertPoint>, infoActiveIds: Set<Long>) {
-    val feats = points
-        .filter { it.infoMode && it.id in infoActiveIds }
-        .map { p ->
-            Feature.fromGeometry(Point.fromLngLat(p.lng, p.lat)).apply {
-                addStringProperty("type", p.type.name)
-                addStringProperty("name", p.name)
-            }
+private fun updateInfoSource(style: Style, popped: List<InfoPop>) {
+    val feats = popped.map { pop ->
+        val p = pop.point
+        Feature.fromGeometry(Point.fromLngLat(p.lng, p.lat)).apply {
+            addStringProperty("type", p.type.name)
+            // The detail "grows out of" the icon: name, then what it is and how far, on its own line.
+            addStringProperty(
+                "name",
+                buildString {
+                    append(p.name)
+                    append("\n")
+                    if (p.name != p.type.label) append(p.type.label).append(" · ")
+                    append(pop.distanceM ?: 0).append(" ม.")
+                }
+            )
+            addNumberProperty("id", p.id) // so a tap on the popped icon resolves to a point
         }
+    }
     style.getSourceAs<GeoJsonSource>(SRC_INFO)?.setGeoJson(FeatureCollection.fromFeatures(feats))
 }
 

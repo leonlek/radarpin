@@ -36,8 +36,8 @@ import com.bydmapcam.alert.Beeper
 import com.bydmapcam.alert.Speaker
 import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.data.PointRepository
+import com.bydmapcam.data.PointType
 import com.bydmapcam.settings.Settings
-import com.bydmapcam.ui.CarUi
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 
@@ -95,10 +95,11 @@ class LocationService : LifecycleService(), LocationListener {
         when (intent?.action) {
             ACTION_SIM_OVERLAY -> {
                 simOverlay = OverlayContent(
-                    type = "กล้องจับความเร็ว",
+                    type = PointType.SPEED_CAMERA.label,
                     distance = "180 ม.",
                     name = "กล้องหน้าโรงเรียน",
-                    next = "ถัดไป · ปั๊ม EV บางจาก   430 ม."
+                    next = "ถัดไป · ปั๊ม EV บางจาก   430 ม.",
+                    color = PointType.SPEED_CAMERA.alertColor.toInt()
                 )
                 updateOverlay()
             }
@@ -165,9 +166,14 @@ class LocationService : LifecycleService(), LocationListener {
         for (p in points) {
             if (!p.alertEnabled) continue // points marked "no alert" are shown on the map but never warn
             val d = GeoUtils.distanceMeters(loc.latitude, loc.longitude, p.lat, p.lng)
-            if (p.infoMode) {
-                // INFO: no beep/banner — just pops the icon up within ~200 m.
-                if (d <= INFO_DISTANCE_M) nowInfo.add(p.id)
+            // INFO style — and every POI, which is a place you're passing, not a hazard: no ring,
+            // no beep, no banner. The icon just swells with its details within ~200 m and closes
+            // again once you're past. Distance goes in the same map so the label can count down.
+            if (p.infoMode || p.type == PointType.POI) {
+                if (d <= INFO_DISTANCE_M) {
+                    nowInfo.add(p.id)
+                    distances[p.id] = d.toInt()
+                }
                 continue
             }
             // Parked inside the radius: you're not driving at this camera, you're sitting next to
@@ -245,7 +251,9 @@ class LocationService : LifecycleService(), LocationListener {
         val type: String,
         val distance: String,
         val name: String,
-        val next: String?
+        val next: String?,
+        /** Matches the in-app banner: red camera, green charger, blue saved point. */
+        val color: Int
     )
 
     /** Floating red card drawn over other apps while backgrounded and inside an alert. */
@@ -273,13 +281,15 @@ class LocationService : LifecycleService(), LocationListener {
             .sortedBy { dist[it.id] ?: Int.MAX_VALUE }
         val lead = sorted.firstOrNull() ?: return null
         val leadDistance = dist[lead.id]
+        val near = leadDistance != null && leadDistance < AlertFormat.FLOOR_M
         return OverlayContent(
             type = lead.type.label,
             distance = leadDistance?.let { AlertFormat.countdown(it) } ?: "ใกล้จุดเตือน",
             name = lead.name,
             next = sorted.getOrNull(1)?.let { n ->
                 "ถัดไป · ${n.name}" + (dist[n.id]?.let { "   $it ม." } ?: "")
-            }
+            },
+            color = (if (near) lead.type.alertColorNear else lead.type.alertColor).toInt()
         )
     }
 
@@ -301,24 +311,22 @@ class LocationService : LifecycleService(), LocationListener {
 
     /**
      * Same card as the in-app rail, but built out of plain views because a service has no Compose
-     * tree — and scaled here by hand, since the activity's density trick doesn't reach this window.
+     * tree.
      */
     private fun showOverlay(content: OverlayContent) {
         val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val scale = CarUi.scale
         val density = resources.displayMetrics.density
-        fun dp(value: Int) = (value * density * scale).toInt()
-        fun sp(value: Float) = value * scale
+        fun dp(value: Int) = (value * density).toInt()
 
         if (overlayView == null) {
             val typeView = TextView(this).apply {
                 setTextColor(0xE0FFFFFF.toInt())
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(13f))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             }
             val dismiss = TextView(this).apply {
                 text = "✕"
                 setTextColor(0xFFFFFFFF.toInt())
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(20f))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
                 setPadding(dp(16), 0, dp(4), dp(4))
                 setOnClickListener { dismissOverlay() }
             }
@@ -333,19 +341,19 @@ class LocationService : LifecycleService(), LocationListener {
             }
             val distanceView = TextView(this).apply {
                 setTextColor(0xFFFFFFFF.toInt())
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(40f))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 40f)
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                 includeFontPadding = false
             }
             val nameView = TextView(this).apply {
                 setTextColor(0xFFFFFFFF.toInt())
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(18f))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
                 maxLines = 2
                 ellipsize = TextUtils.TruncateAt.END
             }
             val nextView = TextView(this).apply {
                 setTextColor(0xD8FFFFFF.toInt())
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(14f))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                 maxLines = 1
                 ellipsize = TextUtils.TruncateAt.END
                 setPadding(0, dp(8), 0, 0)
@@ -353,16 +361,13 @@ class LocationService : LifecycleService(), LocationListener {
             val hint = TextView(this).apply {
                 text = "แตะเพื่อเปิดแอป"
                 setTextColor(0xB0FFFFFF.toInt())
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, sp(12f))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
                 setPadding(0, dp(6), 0, 0)
             }
             val root = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(18), dp(10), dp(12), dp(14))
-                background = GradientDrawable().apply {
-                    setColor(0xF0E53935.toInt())
-                    cornerRadius = dp(20).toFloat()
-                }
+                background = GradientDrawable().apply { cornerRadius = dp(20).toFloat() }
                 // Whole card opens the app; only the ✕ swallows its own tap.
                 setOnClickListener { openApp() }
                 addView(header, LinearLayout.LayoutParams(MATCH, WRAP))
@@ -398,6 +403,7 @@ class LocationService : LifecycleService(), LocationListener {
             overlayNext = nextView
             runCatching { wm.addView(root, lp) }
         }
+        (overlayView?.background as? GradientDrawable)?.setColor(content.color)
         overlayType?.text = content.type
         overlayDistance?.text = content.distance
         overlayName?.text = content.name

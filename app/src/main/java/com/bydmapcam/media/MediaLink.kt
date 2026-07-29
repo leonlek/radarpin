@@ -121,12 +121,22 @@ object MediaLink {
             _nowPlaying.value = null
             return
         }
+        // A paused app keeps its session alive for as long as it likes, so "a session exists" would
+        // leave the bar sitting there over the map long after the music stopped. Sound coming out of
+        // the speakers is the only thing that earns the space.
+        val playing = c.playbackState?.state.let {
+            it == PlaybackState.STATE_PLAYING || it == PlaybackState.STATE_BUFFERING
+        }
+        if (!playing) {
+            _nowPlaying.value = null
+            return
+        }
         val md = c.metadata
         _nowPlaying.value = NowPlaying(
             title = md?.getString(MediaMetadata.METADATA_KEY_TITLE),
             artist = md?.getString(MediaMetadata.METADATA_KEY_ARTIST)
                 ?: md?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST),
-            playing = c.playbackState?.state == PlaybackState.STATE_PLAYING
+            playing = true
         )
     }
 

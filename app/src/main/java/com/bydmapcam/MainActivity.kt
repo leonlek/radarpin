@@ -4,8 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.res.Configuration
-import android.content.res.Resources
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -17,7 +15,6 @@ import androidx.core.content.ContextCompat
 import com.bydmapcam.location.AppState
 import com.bydmapcam.location.LocationService
 import com.bydmapcam.settings.Settings
-import com.bydmapcam.ui.CarUi
 import com.bydmapcam.ui.MapScreen
 import com.bydmapcam.ui.theme.BydMapCamTheme
 
@@ -33,38 +30,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        applyCarDensity()
         setContent {
             BydMapCamTheme {
                 MapScreen()
             }
         }
         ensurePermissionsAndStart()
-    }
-
-    /** The manifest keeps us alive across rotation, so re-assert the density on every config change. */
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        applyCarDensity()
-    }
-
-    /**
-     * A head unit sits ~80 cm from the driver instead of ~30 cm in the hand, and dp is a fixed
-     * physical size — it knows nothing about viewing distance. So a layout that feels right on a
-     * phone is roughly half the size it needs to be in the car.
-     *
-     * Raising the activity's own density scales the whole app in one move: every dp and sp, the
-     * dialogs (which own their window and would ignore a Compose-level override), and MapLibre's
-     * rendering too, since it reads its pixel ratio off this same density — so road labels grow
-     * with everything else. Phones are left exactly as they were.
-     */
-    private fun applyCarDensity() {
-        if (!CarUi.isCar) return
-        val res = resources
-        val config = Configuration(res.configuration)
-        config.densityDpi = (Resources.getSystem().displayMetrics.densityDpi * CarUi.SCALE).toInt()
-        @Suppress("DEPRECATION")
-        res.updateConfiguration(config, res.displayMetrics)
     }
 
     override fun onStart() {

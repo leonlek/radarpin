@@ -23,6 +23,7 @@ object Simulator {
         val points: List<AlertPoint> = emptyList(),
         val activeIds: Set<Long> = emptySet(),
         val distances: Map<Long, Int> = emptyMap(),
+        val infoIds: Set<Long> = emptySet(),
         val speedKmh: Int? = null,
         val nowPlaying: MediaLink.NowPlaying? = null
     )
@@ -78,6 +79,58 @@ object Simulator {
         )
     )
 
+    /** A charger ahead — green banner. */
+    fun alertEv(here: Location?) = set(
+        State(
+            label = "เตือนปั๊ม EV",
+            points = listOf(fakePoint(ID_A, "ปั๊ม EV บางจาก", PointType.EV_STATION, here, 0.0024)),
+            activeIds = setOf(ID_A),
+            distances = mapOf(ID_A to 240),
+            speedKmh = 78
+        )
+    )
+
+    /** A saved place ahead — pops open on the map rather than taking over with a banner. */
+    fun alertPoi(here: Location?) = set(
+        State(
+            label = "จุดสนใจเด้ง",
+            points = listOf(fakePoint(ID_A, "ร้านกาแฟบ้านสวน", PointType.POI, here, 0.0012)),
+            infoIds = setOf(ID_A),
+            distances = mapOf(ID_A to 130),
+            speedKmh = 64
+        )
+    )
+
+    /** INFO style: no banner and no beep, the icon just pops up on the map within ~200 m. */
+    fun infoPop(here: Location?) = set(
+        State(
+            label = "จุดแบบ info เด้ง",
+            points = listOf(
+                fakePoint(ID_C, "ทางร่วมทางแยก", PointType.POI, here, 0.0009).copy(infoMode = true)
+            ),
+            infoIds = setOf(ID_C),
+            distances = mapOf(ID_C to 90),
+            speedKmh = 58
+        )
+    )
+
+    /** Everything at once — the honest test of whether the screen still reads while driving. */
+    fun everything(here: Location?) = set(
+        State(
+            label = "ทุกอย่างพร้อมกัน",
+            points = listOf(
+                fakePoint(ID_A, "กล้องหน้าโรงเรียน", PointType.SPEED_CAMERA, here, 0.0018),
+                fakePoint(ID_B, "ปั๊ม EV บางจาก", PointType.EV_STATION, here, 0.0042),
+                fakePoint(ID_C, "ทางร่วมทางแยก", PointType.POI, here, 0.0009).copy(infoMode = true)
+            ),
+            activeIds = setOf(ID_A, ID_B),
+            distances = mapOf(ID_A to 180, ID_B to 430, ID_C to 90),
+            infoIds = setOf(ID_C),
+            speedKmh = 104,
+            nowPlaying = MediaLink.NowPlaying("ลมเปลี่ยนทิศ", "บอย โกสิยพงษ์", playing = true)
+        )
+    )
+
     /** Music from another app, without needing another app. */
     fun media() = set(
         State(
@@ -113,4 +166,5 @@ object Simulator {
 
     private const val ID_A = -101L
     private const val ID_B = -102L
+    private const val ID_C = -103L
 }
