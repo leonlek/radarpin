@@ -5,6 +5,11 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.RectF
 import android.location.Location
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
@@ -55,6 +60,7 @@ import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.Point
 import org.maplibre.geojson.Polygon
+import kotlinx.coroutines.launch
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -66,6 +72,7 @@ private const val SRC_IDLE = "src-circles-idle"
 private const val SRC_ACTIVE = "src-circles-active"
 private const val SRC_CENTERS = "src-centers"
 private const val SRC_INFO = "src-info"
+private const val SRC_PING = "src-ping"
 private const val SRC_ME = "src-me"
 
 // Follow-camera glide duration ≈ the GPS update interval, so the map moves continuously
@@ -74,6 +81,16 @@ private const val FOLLOW_ANIM_MS = 1000
 
 /** How far off a point a tap can land and still count — a fingertip, not a mouse pointer. */
 private const val TAP_SLOP_DP = 26f
+
+// Entrance timings: short enough to be over before it can distract, slow enough to be seen.
+private const val POP_SCALE_FROM = 1.1f
+private const val POP_SCALE_TO = 2.0f
+private const val POP_FADE_IN_MS = 180
+private const val POP_FADE_OUT_MS = 200
+private const val PING_MS = 700
+private const val PING_FROM_PX = 8f
+private const val PING_TO_PX = 78f
+private const val PING_ALPHA = 0.7f
 
 /** A point currently popped open on the map, with the distance its label is counting down. */
 private data class InfoPop(val point: AlertPoint, val distanceM: Int?)
@@ -109,6 +126,11 @@ fun MapLibreMap(
     var firstFix by remember { mutableStateOf(true) }
     // Camera follows the car until the user pans; the locate button re-enables it.
     var followMode by remember { mutableStateOf(true) }
+    // Entrance animation state for the pop, plus which ids have already played it.
+    val popScale = remember { Animatable(POP_SCALE_TO) }
+    val popFade = remember { Animatable(1f) }
+    val pingProgress = remember { Animatable(1f) }
+    var shownIds by remember { mutableStateOf(emptySet<Long>()) }
     val inForeground by AppState.inForeground.collectAsState()
 
     DisposableEffect(lifecycleOwner, mapView) {
@@ -197,7 +219,63 @@ fun MapLibreMap(
     LaunchedEffect(popped, style, inForeground) {
         val s = style ?: return@LaunchedEffect
         if (!inForeground) return@LaunchedEffect
+        val icon = s.getLayerAs<SymbolLayer>("lyr-info")
+        val ping = s.getLayerAs<CircleLayer>("lyr-ping")
+
+        if (popped.isEmpty()) {
+            // Fade the label and icon out before dropping the features, so it doesn't blink away.
+            popFade.animateTo(0f, tween(POP_FADE_OUT_MS)) {
+                icon?.setProperties(
+                    PropertyFactory.iconOpacity(value),
+                    PropertyFactory.textOpacity(value)
+                )
+            }
+            updateInfoSource(s, emptyList())
+            ping?.setProperties(PropertyFactory.circleStrokeOpacity(0f))
+            return@LaunchedEffect
+        }
+
         updateInfoSource(s, popped)
+        val fresh = popped.map { it.point.id }.toSet() - shownIds
+        shownIds = popped.map { it.point.id }.toSet()
+        if (fresh.isEmpty()) {
+            // Only the distance changed — leave the icon where it is, don't replay the entrance.
+            icon?.setProperties(PropertyFactory.iconOpacity(1f), PropertyFactory.textOpacity(1f))
+            return@LaunchedEffect
+        }
+
+        // Entrance: the icon springs up past its size and settles, label fading in with it, while a
+        // single ring sweeps outward. Both are one-shot — nothing keeps moving in the driver's
+        // peripheral vision, and nothing costs a frame once it's done.
+        popFade.snapTo(0f)
+        popScale.snapTo(POP_SCALE_FROM)
+        launch {
+            popScale.animateTo(
+                POP_SCALE_TO,
+                spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMediumLow)
+            ) {
+                icon?.setProperties(PropertyFactory.iconSize(value))
+            }
+        }
+        launch {
+            popFade.animateTo(1f, tween(POP_FADE_IN_MS)) {
+                icon?.setProperties(
+                    PropertyFactory.iconOpacity(value),
+                    PropertyFactory.textOpacity(value)
+                )
+            }
+        }
+        launch {
+            updatePingSource(s, popped)
+            pingProgress.snapTo(0f)
+            pingProgress.animateTo(1f, tween(PING_MS, easing = FastOutSlowInEasing)) {
+                ping?.setProperties(
+                    PropertyFactory.circleRadius(PING_FROM_PX + (PING_TO_PX - PING_FROM_PX) * value),
+                    PropertyFactory.circleStrokeOpacity(PING_ALPHA * (1f - value))
+                )
+            }
+            ping?.setProperties(PropertyFactory.circleStrokeOpacity(0f))
+        }
     }
 
     // Me arrow + camera. Skip entirely while backgrounded (map not visible) to save CPU/battery.
@@ -368,6 +446,19 @@ private fun setupLayers(style: Style) {
         )
     )
 
+    // One radar sweep out of the icon as it opens — catchable out of the corner of the eye, then
+    // gone. Under the symbol layer so the icon always sits on top of it.
+    style.addSource(GeoJsonSource(SRC_PING))
+    style.addLayer(
+        CircleLayer("lyr-ping", SRC_PING).withProperties(
+            PropertyFactory.circleRadius(0f),
+            PropertyFactory.circleColor(android.graphics.Color.TRANSPARENT),
+            PropertyFactory.circleStrokeWidth(3f),
+            PropertyFactory.circleStrokeColor(alertColorByType()),
+            PropertyFactory.circleStrokeOpacity(0f)
+        )
+    )
+
     // INFO pop: enlarged icon + name for INFO points currently within ~200 m.
     style.addSource(GeoJsonSource(SRC_INFO))
     style.addLayer(
@@ -471,6 +562,16 @@ private fun updateMeSource(
         addNumberProperty("bearing", bearing)
     }
     style.getSourceAs<GeoJsonSource>(SRC_ME)?.setGeoJson(meFeature)
+}
+
+/** The ring only needs a position and a type to take its colour from. */
+private fun updatePingSource(style: Style, popped: List<InfoPop>) {
+    val feats = popped.map { pop ->
+        Feature.fromGeometry(Point.fromLngLat(pop.point.lng, pop.point.lat)).apply {
+            addStringProperty("type", pop.point.type.name)
+        }
+    }
+    style.getSourceAs<GeoJsonSource>(SRC_PING)?.setGeoJson(FeatureCollection.fromFeatures(feats))
 }
 
 private fun updateInfoSource(style: Style, popped: List<InfoPop>) {

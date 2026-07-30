@@ -117,7 +117,7 @@ fun SettingsDialog(
                     subtitle = if (mediaAccess)
                         "อนุญาตแล้ว — แถบเพลงจะขึ้นชื่อเพลงที่กำลังเล่น"
                     else
-                        "ปุ่มเล่น/หยุดใช้ได้อยู่แล้ว · เปิด \"การเข้าถึงการแจ้งเตือน\" เพิ่ม เพื่อให้เห็นชื่อเพลง (บางหัวรถไม่มีหน้านี้)"
+                        "ปุ่มเล่น/หยุดใช้ได้อยู่แล้ว · ชื่อเพลงต้องเปิด \"การเข้าถึงการแจ้งเตือน\" ซึ่งจอ BYD บล็อกไว้ (ขึ้น \"IVI system does not support this operation\") — บนมือถือเปิดได้ปกติ"
                 ) {
                     TextButton(onClick = {
                         if (!MediaLink.openAccessSettings(context)) {

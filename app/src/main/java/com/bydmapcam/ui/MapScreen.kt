@@ -267,10 +267,12 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             SmallFloatingActionButton(onClick = { recenterTick++ }) {
                 LocateIcon(color = MaterialTheme.colorScheme.onPrimaryContainer)
             }
-            if (activeTrip == null) {
-                SmallFloatingActionButton(onClick = { showTripStart = true }) {
-                    Text("ทริป")
-                }
+            // Always there, so the button never moves under you: it starts a trip when none is
+            // running, and asks for the current % when one is.
+            SmallFloatingActionButton(
+                onClick = { if (activeTrip == null) showTripStart = true else showTripSoc = true }
+            ) {
+                Text("ทริป")
             }
             SmallFloatingActionButton(onClick = { showList = true }) {
                 Text("จุด")

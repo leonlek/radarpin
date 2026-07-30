@@ -29,6 +29,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -139,7 +141,12 @@ fun StartTripDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("อ่านเลข % แบตจากหน้าปัดรถแล้วกรอก", style = MaterialTheme.typography.bodySmall)
-                PercentField(value = soc, onValueChange = { soc = it }, label = "แบตตอนนี้ (%)")
+                PercentField(
+                    value = soc,
+                    onValueChange = { soc = it },
+                    label = "แบตตอนนี้ (%)",
+                    autoFocus = true
+                )
             }
         }
     )
@@ -171,7 +178,12 @@ fun TripSocDialog(
                 )
                 LabelValue("เริ่มทริปที่", "$startSoc%")
                 LabelValue("วิ่งมาแล้ว", "%.1f กม.".format(distanceKm))
-                PercentField(value = soc, onValueChange = { soc = it }, label = "แบตตอนนี้ (%)")
+                PercentField(
+                    value = soc,
+                    onValueChange = { soc = it },
+                    label = "แบตตอนนี้ (%)",
+                    autoFocus = true
+                )
                 // Live preview of what the card will show, so a typo is obvious before saving.
                 val used = pct?.let { startSoc - it }
                 Text(
@@ -370,14 +382,26 @@ fun TripHistoryDialog(
 }
 
 @Composable
-private fun PercentField(value: String, onValueChange: (String) -> Unit, label: String) {
+private fun PercentField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    /** The one field worth typing in — take focus and raise the keypad so it's one tap, not three. */
+    autoFocus: Boolean = false
+) {
+    val focus = remember { FocusRequester() }
+    if (autoFocus) {
+        LaunchedEffect(Unit) { focus.requestFocus() }
+    }
     OutlinedTextField(
         value = value,
         onValueChange = { onValueChange(it.filter { c -> c.isDigit() }.take(3)) },
         label = { Text(label) },
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (autoFocus) Modifier.focusRequester(focus) else Modifier)
     )
 }
 
