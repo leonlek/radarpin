@@ -90,7 +90,8 @@ private const val POP_FADE_OUT_MS = 200
 private const val PING_MS = 700
 private const val PING_FROM_PX = 8f
 private const val PING_TO_PX = 78f
-private const val PING_ALPHA = 0.7f
+private const val PING_ALPHA = 0.95f
+private const val PING_FILL_ALPHA = 0.3f
 
 /** A point currently popped open on the map, with the distance its label is counting down. */
 private data class InfoPop(val point: AlertPoint, val distanceM: Int?)
@@ -231,7 +232,10 @@ fun MapLibreMap(
                 )
             }
             updateInfoSource(s, emptyList())
-            ping?.setProperties(PropertyFactory.circleStrokeOpacity(0f))
+            ping?.setProperties(
+                PropertyFactory.circleStrokeOpacity(0f),
+                PropertyFactory.circleOpacity(0f)
+            )
             return@LaunchedEffect
         }
 
@@ -271,10 +275,14 @@ fun MapLibreMap(
             pingProgress.animateTo(1f, tween(PING_MS, easing = FastOutSlowInEasing)) {
                 ping?.setProperties(
                     PropertyFactory.circleRadius(PING_FROM_PX + (PING_TO_PX - PING_FROM_PX) * value),
-                    PropertyFactory.circleStrokeOpacity(PING_ALPHA * (1f - value))
+                    PropertyFactory.circleStrokeOpacity(PING_ALPHA * (1f - value)),
+                    PropertyFactory.circleOpacity(PING_FILL_ALPHA * (1f - value))
                 )
             }
-            ping?.setProperties(PropertyFactory.circleStrokeOpacity(0f))
+            ping?.setProperties(
+                PropertyFactory.circleStrokeOpacity(0f),
+                PropertyFactory.circleOpacity(0f)
+            )
         }
     }
 
@@ -452,8 +460,11 @@ private fun setupLayers(style: Style) {
     style.addLayer(
         CircleLayer("lyr-ping", SRC_PING).withProperties(
             PropertyFactory.circleRadius(0f),
-            PropertyFactory.circleColor(android.graphics.Color.TRANSPARENT),
-            PropertyFactory.circleStrokeWidth(3f),
+            // A washed-out ring reads as a rendering artefact; it needs a filled body behind the
+            // stroke to be caught peripherally at a glance.
+            PropertyFactory.circleColor(alertColorByType()),
+            PropertyFactory.circleOpacity(0f),
+            PropertyFactory.circleStrokeWidth(6f),
             PropertyFactory.circleStrokeColor(alertColorByType()),
             PropertyFactory.circleStrokeOpacity(0f)
         )
