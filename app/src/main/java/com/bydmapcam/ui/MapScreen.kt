@@ -681,7 +681,7 @@ private fun AlertRail(
     val leadDistance = distances[lead.id]
     Surface(
         onClick = { onSelect(lead) },
-        modifier = modifier.width(232.dp),
+        modifier = modifier.width(270.dp),
         color = Color(
             if (leadDistance != null && leadDistance < AlertFormat.FLOOR_M) lead.type.alertColorNear
             else lead.type.alertColor
@@ -689,12 +689,12 @@ private fun AlertRail(
         shape = MaterialTheme.shapes.large,
         shadowElevation = 6.dp
     ) {
-        Column(Modifier.padding(start = 16.dp, top = 10.dp, end = 10.dp, bottom = 14.dp)) {
+        Column(Modifier.padding(start = 18.dp, top = 12.dp, end = 12.dp, bottom = 16.dp)) {
             Row(verticalAlignment = Alignment.Top) {
                 Text(
                     text = lead.type.label,
                     color = Color.White.copy(alpha = .88f),
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelLarge,
                     letterSpacing = 1.sp,
                     modifier = Modifier.weight(1f).padding(top = 6.dp)
                 )
@@ -702,7 +702,7 @@ private fun AlertRail(
                     onClick = onDismiss,
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                 ) {
-                    Text("✕", color = Color.White, fontSize = 18.sp)
+                    Text("✕", color = Color.White, fontSize = 21.sp)
                 }
             }
 
@@ -711,33 +711,33 @@ private fun AlertRail(
                     Text(
                         text = "$leadDistance",
                         color = Color.White,
-                        fontSize = 52.sp,
+                        fontSize = 62.sp,
                         fontWeight = FontWeight.Bold,
                         style = TextStyle(fontFeatureSettings = "tnum"),
-                        lineHeight = 54.sp
+                        lineHeight = 64.sp
                     )
                     Text(
                         text = " ม.",
                         color = Color.White.copy(alpha = .9f),
-                        fontSize = 20.sp,
+                        fontSize = 24.sp,
                         fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(bottom = 7.dp)
+                        modifier = Modifier.padding(bottom = 8.dp)
                     )
                 }
             } else {
                 Text(
                     text = "ถึงจุดแล้ว",
                     color = Color.White,
-                    fontSize = 38.sp,
+                    fontSize = 44.sp,
                     fontWeight = FontWeight.Bold,
-                    lineHeight = 44.sp
+                    lineHeight = 50.sp
                 )
             }
 
             Text(
                 text = lead.name,
                 color = Color.White,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleLarge,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
