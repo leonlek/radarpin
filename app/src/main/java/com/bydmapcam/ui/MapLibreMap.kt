@@ -83,7 +83,9 @@ private const val FOLLOW_ANIM_MS = 1000
 private const val TAP_SLOP_DP = 26f
 
 // Entrance timings: short enough to be over before it can distract, slow enough to be seen.
-private const val POP_SCALE_FROM = 1.1f
+private const val POP_SCALE_FROM = 1.15f
+/** Just enough overshoot to feel alive; more looks like the icon is wobbling. */
+private const val POP_DAMPING = 0.62f
 private const val POP_SCALE_TO = 2.0f
 private const val POP_FADE_IN_MS = 180
 private const val POP_FADE_OUT_MS = 200
@@ -131,7 +133,6 @@ fun MapLibreMap(
     val popScale = remember { Animatable(POP_SCALE_TO) }
     val popFade = remember { Animatable(1f) }
     val pingProgress = remember { Animatable(1f) }
-    var shownIds by remember { mutableStateOf(emptySet<Long>()) }
     val inForeground by AppState.inForeground.collectAsState()
 
     DisposableEffect(lifecycleOwner, mapView) {
@@ -217,13 +218,25 @@ fun MapLibreMap(
         points.filter { it.id in infoActiveIds }
             .map { InfoPop(it, distances[it.id]?.let { d -> (d / 10) * 10 }) }
     }
+    // Which points are open drives the animation; the label text drives only the source. Keeping
+    // them on separate keys matters: the distance ticks down every 10 m, and if that restarted the
+    // effect it would cancel the entrance half-way and leave the icon frozen at whatever size the
+    // spring had reached.
+    val poppedIds = remember(popped) { popped.map { it.point.id }.toSet() }
+
     LaunchedEffect(popped, style, inForeground) {
+        val s = style ?: return@LaunchedEffect
+        if (!inForeground || popped.isEmpty()) return@LaunchedEffect
+        updateInfoSource(s, popped)
+    }
+
+    LaunchedEffect(poppedIds, style, inForeground) {
         val s = style ?: return@LaunchedEffect
         if (!inForeground) return@LaunchedEffect
         val icon = s.getLayerAs<SymbolLayer>("lyr-info")
         val ping = s.getLayerAs<CircleLayer>("lyr-ping")
 
-        if (popped.isEmpty()) {
+        if (poppedIds.isEmpty()) {
             // Fade the label and icon out before dropping the features, so it doesn't blink away.
             popFade.animateTo(0f, tween(POP_FADE_OUT_MS)) {
                 icon?.setProperties(
@@ -232,6 +245,7 @@ fun MapLibreMap(
                 )
             }
             updateInfoSource(s, emptyList())
+            updatePingSource(s, emptyList())
             ping?.setProperties(
                 PropertyFactory.circleStrokeOpacity(0f),
                 PropertyFactory.circleOpacity(0f)
@@ -239,27 +253,21 @@ fun MapLibreMap(
             return@LaunchedEffect
         }
 
-        updateInfoSource(s, popped)
-        val fresh = popped.map { it.point.id }.toSet() - shownIds
-        shownIds = popped.map { it.point.id }.toSet()
-        if (fresh.isEmpty()) {
-            // Only the distance changed — leave the icon where it is, don't replay the entrance.
-            icon?.setProperties(PropertyFactory.iconOpacity(1f), PropertyFactory.textOpacity(1f))
-            return@LaunchedEffect
-        }
-
         // Entrance: the icon springs up past its size and settles, label fading in with it, while a
         // single ring sweeps outward. Both are one-shot — nothing keeps moving in the driver's
         // peripheral vision, and nothing costs a frame once it's done.
+        updateInfoSource(s, popped)
         popFade.snapTo(0f)
         popScale.snapTo(POP_SCALE_FROM)
         launch {
             popScale.animateTo(
                 POP_SCALE_TO,
-                spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMediumLow)
+                spring(dampingRatio = POP_DAMPING, stiffness = Spring.StiffnessMediumLow)
             ) {
                 icon?.setProperties(PropertyFactory.iconSize(value))
             }
+            // Land exactly on the target even if the spring was interrupted.
+            icon?.setProperties(PropertyFactory.iconSize(POP_SCALE_TO))
         }
         launch {
             popFade.animateTo(1f, tween(POP_FADE_IN_MS)) {
@@ -268,6 +276,10 @@ fun MapLibreMap(
                     PropertyFactory.textOpacity(value)
                 )
             }
+            icon?.setProperties(
+                PropertyFactory.iconOpacity(1f),
+                PropertyFactory.textOpacity(1f)
+            )
         }
         launch {
             updatePingSource(s, popped)
