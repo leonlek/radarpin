@@ -11,6 +11,7 @@ object Settings {
     private const val KEY_HEADING_UP = "heading_up"
     private const val KEY_DIRECTION_AWARE = "direction_aware"
     private const val KEY_AUTO_BOOT = "auto_start_boot"
+    private const val KEY_ME_ICON = "me_icon"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
@@ -45,6 +46,14 @@ object Settings {
 
     fun setAutoStartOnBoot(context: Context, value: Boolean) =
         prefs(context).edit().putBoolean(KEY_AUTO_BOOT, value).apply()
+
+    fun meIcon(context: Context): MeIcon {
+        val name = prefs(context).getString(KEY_ME_ICON, null) ?: return MeIcon.ARROW
+        return runCatching { MeIcon.valueOf(name) }.getOrDefault(MeIcon.ARROW)
+    }
+
+    fun setMeIcon(context: Context, value: MeIcon) =
+        prefs(context).edit().putString(KEY_ME_ICON, value.name).apply()
 
     fun canDrawOverlays(context: Context): Boolean = AndroidSettings.canDrawOverlays(context)
 }

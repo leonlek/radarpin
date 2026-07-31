@@ -126,6 +126,7 @@ fun TripStatusCard(
 @Composable
 fun StartTripDialog(
     onDismiss: () -> Unit,
+    onOpenHistory: () -> Unit,
     onStart: (startSoc: Int) -> Unit
 ) {
     var soc by remember { mutableStateOf("") }
@@ -147,6 +148,7 @@ fun StartTripDialog(
                     label = "แบตตอนนี้ (%)",
                     autoFocus = true
                 )
+                TextButton(onClick = onOpenHistory) { Text("ดูประวัติทริปที่ผ่านมา") }
             }
         }
     )
@@ -229,7 +231,12 @@ fun FinishTripDialog(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 LabelValue("ระยะทางที่วิ่ง", "%.1f กม.".format(distanceKm))
                 Text("แบตเริ่มทริป: $startSoc%", style = MaterialTheme.typography.bodySmall)
-                PercentField(value = soc, onValueChange = { soc = it }, label = "แบตตอนนี้ (%)")
+                PercentField(
+                    value = soc,
+                    onValueChange = { soc = it },
+                    label = "แบตตอนนี้ (%)",
+                    autoFocus = true
+                )
                 if (noDrop) {
                     Text(
                         "แบตไม่ลด — จะไม่คำนวณ กม./1% ให้",

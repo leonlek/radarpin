@@ -1,0 +1,22 @@
+<!-- Top-down SUV, nose up. Generic bodywork on purpose: shipping a carmaker's actual silhouette
+     would be their artwork, and at this size the class of vehicle is all that reads anyway. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="50dp"
+    android:height="50dp"
+    android:viewportWidth="40"
+    android:viewportHeight="40">
+    <!-- white halo so it stays visible over dark roads and green land alike -->
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M20,1.5 c5.4,0 9.6,2.6 9.6,7 v22 c0,5.4 -3.6,8 -9.6,8 s-9.6,-2.6 -9.6,-8 v-22 c0,-4.4 4.2,-7 9.6,-7 z" />
+    <path android:fillColor="#1565C0"
+        android:pathData="M20,3.4 c4.5,0 7.8,2.1 7.8,5.6 v21.5 c0,4.3 -3,6.3 -7.8,6.3 s-7.8,-2 -7.8,-6.3 v-21.5 c0,-3.5 3.3,-5.6 7.8,-5.6 z" />
+    <!-- windscreen -->
+    <path android:fillColor="#BBDEFB"
+        android:pathData="M14.4,11.2 h11.2 l-1.1,5.6 h-9 z" />
+    <!-- roof -->
+    <path android:fillColor="#0D47A1"
+        android:pathData="M14.6,17.6 h10.8 v8.2 h-10.8 z" />
+    <!-- rear window -->
+    <path android:fillColor="#90CAF9"
+        android:pathData="M15,26.6 h10 l0.8,4.6 h-11.6 z" />
+</vector>

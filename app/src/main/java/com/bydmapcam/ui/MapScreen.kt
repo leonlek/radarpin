@@ -105,6 +105,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     var selectedPoint by remember { mutableStateOf<AlertPoint?>(null) }
     var focus by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var headingUp by remember { mutableStateOf(Settings.headingUp(context)) }
+    var meIcon by remember { mutableStateOf(Settings.meIcon(context)) }
     var bannerDismissed by remember { mutableStateOf<Set<Long>>(emptySet()) }
     val radioState by RadioPlayer.state.collectAsState()
     val nowPlaying by MediaLink.nowPlaying.collectAsState()
@@ -153,6 +154,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             },
             focus = focus,
             headingUp = headingUp,
+            meIcon = meIcon,
             modifier = Modifier.fillMaxSize()
         )
 
@@ -407,6 +409,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     if (showTripStart) {
         StartTripDialog(
             onDismiss = { showTripStart = false },
+            onOpenHistory = { showTripStart = false; showTripHistory = true },
             onStart = { startSoc ->
                 vm.startTrip(startSoc)
                 showTripStart = false
@@ -465,6 +468,8 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         SettingsDialog(
             headingUp = headingUp,
             onHeadingUpChange = { headingUp = it; Settings.setHeadingUp(context, it) },
+            meIcon = meIcon,
+            onMeIconChange = { meIcon = it; Settings.setMeIcon(context, it) },
             onOpenTripHistory = { showSettings = false; showTripHistory = true },
             onImportCameras = {
                 Toast.makeText(context, "กำลังนำเข้าฐานกล้อง…", Toast.LENGTH_SHORT).show()

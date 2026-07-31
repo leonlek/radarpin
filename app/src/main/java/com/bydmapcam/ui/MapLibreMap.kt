@@ -41,6 +41,7 @@ import com.bydmapcam.R
 import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.data.PointType
 import com.bydmapcam.location.AppState
+import com.bydmapcam.settings.MeIcon
 import com.bydmapcam.offline.MapCamera
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -68,7 +69,6 @@ import kotlin.math.sin
 // Fallback (raster OSM): build a Style from a raster source pointing at tile.openstreetmap.org.
 private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 
-private const val SRC_IDLE = "src-circles-idle"
 private const val SRC_ACTIVE = "src-circles-active"
 private const val SRC_CENTERS = "src-centers"
 private const val SRC_INFO = "src-info"
@@ -112,6 +112,7 @@ fun MapLibreMap(
     onMarkerClick: (id: Long) -> Unit,
     focus: Pair<Double, Double>?,
     headingUp: Boolean,
+    meIcon: MeIcon,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -340,6 +341,12 @@ fun MapLibreMap(
         m.uiSettings.setAttributionMargins(with(density) { 104.dp.roundToPx() }, 0, 0, bottom)
     }
 
+    // Swap the car marker when the setting changes.
+    LaunchedEffect(meIcon, style) {
+        style?.getLayerAs<SymbolLayer>("lyr-me")
+            ?.setProperties(PropertyFactory.iconImage(meIcon.imageId))
+    }
+
     // Zoom buttons — same one-step-per-tap as the map's own gesture, but reachable with a thumb.
     LaunchedEffect(zoomInTick) {
         if (zoomInTick > 0) map?.animateCamera(CameraUpdateFactory.zoomIn())
@@ -385,11 +392,11 @@ fun MapLibreMap(
         // frame. When the user pans away, the layer arrow takes over at the real position.
         if (followMode && location != null) {
             Image(
-                painter = painterResource(R.drawable.ic_me_arrow),
+                painter = painterResource(meIcon.res),
                 contentDescription = null,
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .size(32.dp)
+                    .size(if (meIcon == MeIcon.ARROW) 32.dp else 50.dp)
                     // Heading-up already rotates the whole map, so the arrow simply points up.
                     .rotate(if (headingUp && location.hasBearing()) 0f else location.bearing)
             )
@@ -410,20 +417,6 @@ private fun alertColorByType(): Expression = Expression.match(
 private fun colorHex(argb: Long): String = "#%06X".format(argb and 0xFFFFFF)
 
 private fun setupLayers(style: Style) {
-    style.addSource(GeoJsonSource(SRC_IDLE))
-    style.addLayer(
-        FillLayer("lyr-idle-fill", SRC_IDLE).withProperties(
-            PropertyFactory.fillColor(android.graphics.Color.parseColor("#1E88E5")),
-            PropertyFactory.fillOpacity(0.15f)
-        )
-    )
-    style.addLayer(
-        LineLayer("lyr-idle-line", SRC_IDLE).withProperties(
-            PropertyFactory.lineColor(android.graphics.Color.parseColor("#1E88E5")),
-            PropertyFactory.lineWidth(1.5f)
-        )
-    )
-
     // The live ring matches its banner, so a green card never sits over a red circle.
     style.addSource(GeoJsonSource(SRC_ACTIVE))
     style.addLayer(
@@ -512,7 +505,7 @@ private fun setupLayers(style: Style) {
     style.addSource(GeoJsonSource(SRC_ME))
     style.addLayer(
         SymbolLayer("lyr-me", SRC_ME).withProperties(
-            PropertyFactory.iconImage("me_arrow"),
+            PropertyFactory.iconImage(MeIcon.ARROW.imageId),
             PropertyFactory.iconAllowOverlap(true),
             PropertyFactory.iconSize(1.0f),
             // Rotate the arrow to the driving direction (property "bearing"), relative to the map.
@@ -537,7 +530,7 @@ private fun addMarkerImages(style: Style, context: Context) {
     style.addImage("m_camera", drawableToBitmap(context, R.drawable.ic_marker_camera))
     style.addImage("m_poi", drawableToBitmap(context, R.drawable.ic_marker_poi))
     style.addImage("m_ev", drawableToBitmap(context, R.drawable.ic_marker_ev))
-    style.addImage("me_arrow", drawableToBitmap(context, R.drawable.ic_me_arrow))
+    MeIcon.entries.forEach { style.addImage(it.imageId, drawableToBitmap(context, it.res)) }
 }
 
 private fun updatePointSources(
@@ -545,16 +538,17 @@ private fun updatePointSources(
     points: List<AlertPoint>,
     activeIds: Set<Long>
 ) {
-    val idle = ArrayList<Feature>()
     val active = ArrayList<Feature>()
     val centers = ArrayList<Feature>()
     for (p in points) {
-        // Only hazards get a radius circle. Everything else is announced by the icon pop instead,
-        // so a ring would be noise around something you're merely driving past.
-        if (p.alertEnabled && !p.infoMode && !p.type.popsOnly) {
-            val poly = Feature.fromGeometry(circlePolygon(p.lat, p.lng, p.radiusM.toDouble()))
-                .apply { addStringProperty("type", p.type.name) }
-            if (p.id in activeIds) active.add(poly) else idle.add(poly)
+        // A ring means "this one is warning you right now", so it appears with the alert and goes
+        // with it — including the moment you drive past and the banner closes. Points that only pop
+        // (POI, charger, INFO) never draw one at all.
+        if (p.id in activeIds && p.alertEnabled && !p.infoMode && !p.type.popsOnly) {
+            active.add(
+                Feature.fromGeometry(circlePolygon(p.lat, p.lng, p.radiusM.toDouble()))
+                    .apply { addStringProperty("type", p.type.name) }
+            )
         }
         centers.add(
             Feature.fromGeometry(Point.fromLngLat(p.lng, p.lat)).apply {
@@ -564,7 +558,6 @@ private fun updatePointSources(
             }
         )
     }
-    style.getSourceAs<GeoJsonSource>(SRC_IDLE)?.setGeoJson(FeatureCollection.fromFeatures(idle))
     style.getSourceAs<GeoJsonSource>(SRC_ACTIVE)?.setGeoJson(FeatureCollection.fromFeatures(active))
     style.getSourceAs<GeoJsonSource>(SRC_CENTERS)?.setGeoJson(FeatureCollection.fromFeatures(centers))
 }

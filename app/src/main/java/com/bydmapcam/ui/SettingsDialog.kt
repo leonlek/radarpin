@@ -4,9 +4,14 @@ import android.content.Intent
 import android.widget.Toast
 import android.net.Uri
 import android.provider.Settings as AndroidSettings
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -20,15 +25,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.bydmapcam.media.MediaLink
+import com.bydmapcam.settings.MeIcon
 import com.bydmapcam.settings.Settings
 
 @Composable
 fun SettingsDialog(
     headingUp: Boolean,
     onHeadingUpChange: (Boolean) -> Unit,
+    meIcon: MeIcon,
+    onMeIconChange: (MeIcon) -> Unit,
     onImportCameras: () -> Unit,
     onOpenOffline: () -> Unit,
     onOpenTripHistory: () -> Unit,
@@ -52,6 +62,39 @@ fun SettingsDialog(
                     subtitle = "โหมดขับ: ทิศที่ขับอยู่ด้านบนเสมอ"
                 ) {
                     Switch(checked = headingUp, onCheckedChange = onHeadingUpChange)
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("ไอคอนรถบนแผนที่")
+                    Text(
+                        "เลือกว่าจะให้ตำแหน่งรถเป็นลูกศรหรือรูปรถ",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        MeIcon.entries.forEach { option ->
+                            val selected = option == meIcon
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .clip(MaterialTheme.shapes.medium)
+                                    .background(
+                                        if (selected) MaterialTheme.colorScheme.primaryContainer
+                                        else MaterialTheme.colorScheme.surfaceVariant
+                                    )
+                                    .clickable { onMeIconChange(option) }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                            ) {
+                                Image(
+                                    painter = painterResource(option.res),
+                                    contentDescription = option.label,
+                                    modifier = Modifier.size(34.dp)
+                                )
+                                Text(option.label, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
                 }
                 SettingRow(
                     title = "เตือนเฉพาะทิศเข้าหา",

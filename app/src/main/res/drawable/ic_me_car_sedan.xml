@@ -1,0 +1,17 @@
+<!-- Top-down saloon, nose up: narrower than the SUV with a tapered nose. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="50dp"
+    android:height="50dp"
+    android:viewportWidth="40"
+    android:viewportHeight="40">
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M20,1.5 c4.4,0 8.4,3.4 8.8,8.4 l0.6,18.4 c0.1,5.6 -3.6,9.2 -9.4,9.2 s-9.5,-3.6 -9.4,-9.2 l0.6,-18.4 c0.4,-5 4.4,-8.4 8.8,-8.4 z" />
+    <path android:fillColor="#1565C0"
+        android:pathData="M20,3.5 c3.6,0 6.7,2.8 7,7 l0.6,17.9 c0.1,4.4 -2.8,7.2 -7.6,7.2 s-7.7,-2.8 -7.6,-7.2 l0.6,-17.9 c0.3,-4.2 3.4,-7 7,-7 z" />
+    <path android:fillColor="#BBDEFB"
+        android:pathData="M14.9,11.6 h10.2 l-1,5.2 h-8.2 z" />
+    <path android:fillColor="#0D47A1"
+        android:pathData="M15.1,17.6 h9.8 v7.8 h-9.8 z" />
+    <path android:fillColor="#90CAF9"
+        android:pathData="M15.4,26.2 h9.2 l0.8,4.4 h-10.8 z" />
+</vector>
