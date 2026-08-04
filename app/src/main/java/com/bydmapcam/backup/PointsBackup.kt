@@ -22,6 +22,10 @@ object PointsBackup {
                     put("alertSound", p.alertSound)
                     put("infoMode", p.infoMode)
                     put("imported", p.imported)
+                    // JSONObject.put(String, Object) writes a null as JSON null, which optDouble
+                    // reads back as NaN — so leave the key out entirely when there's no heading.
+                    p.headingDeg?.let { put("headingDeg", it) }
+                    put("oneWay", p.oneWay)
                     put("createdAt", p.createdAt)
                 }
             )
@@ -50,6 +54,8 @@ object PointsBackup {
                     alertSound = o.optBoolean("alertSound", true),
                     infoMode = o.optBoolean("infoMode", false),
                     imported = o.optBoolean("imported", false),
+                    headingDeg = if (o.has("headingDeg")) o.optDouble("headingDeg") else null,
+                    oneWay = o.optBoolean("oneWay", false),
                     createdAt = o.optLong("createdAt", 0L)
                 )
             )

@@ -1,12 +1,16 @@
 package com.bydmapcam.ui
 
+import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.widget.Toast
 import android.net.Uri
 import android.provider.Settings as AndroidSettings
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,6 +36,9 @@ import androidx.compose.ui.unit.dp
 import com.bydmapcam.media.MediaLink
 import com.bydmapcam.settings.MeIcon
 import com.bydmapcam.settings.Settings
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun SettingsDialog(
@@ -56,7 +63,19 @@ fun SettingsDialog(
         confirmButton = { TextButton(onClick = onDismiss) { Text("ปิด") } },
         title = { Text("ตั้งค่า") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            // Scrollable: the list has outgrown a head unit's dialog height, and a row that falls
+            // off the bottom is indistinguishable from a row that isn't in the build at all.
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                // Which build is actually on the car — the only way to answer that from the seat,
+                // and the first thing worth knowing when a change "didn't show up".
+                Text(
+                    text = appVersion(context),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 SettingRow(
                     title = "หมุนแผนที่ตามทิศทางขับ",
                     subtitle = "โหมดขับ: ทิศที่ขับอยู่ด้านบนเสมอ"
@@ -156,11 +175,28 @@ fun SettingsDialog(
                     )
                 }
                 SettingRow(
-                    title = "แสดงชื่อเพลงที่กำลังเล่น",
+                    title = "สัญญาณบูตล่าสุด",
+                    subtitle = bootStatus(context)
+                ) {
+                    if (!Settings.canDrawOverlays(context)) {
+                        TextButton(onClick = {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(
+                                        AndroidSettings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                        Uri.parse("package:${context.packageName}")
+                                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                )
+                            }
+                        }) { Text("ให้สิทธิ์") }
+                    }
+                }
+                SettingRow(
+                    title = "แถบควบคุมเพลง",
                     subtitle = if (mediaAccess)
-                        "อนุญาตแล้ว — แถบเพลงจะขึ้นชื่อเพลงที่กำลังเล่น"
+                        "อนุญาตแล้ว — แถบควบคุมพร้อมชื่อเพลงจะขึ้นเมื่อมีเพลงเล่นอยู่"
                     else
-                        "ปุ่มเล่น/หยุดใช้ได้อยู่แล้ว · ชื่อเพลงต้องเปิด \"การเข้าถึงการแจ้งเตือน\" ซึ่งจอ BYD บล็อกไว้ (ขึ้น \"IVI system does not support this operation\") — บนมือถือเปิดได้ปกติ"
+                        "ต้องเปิด \"การเข้าถึงการแจ้งเตือน\" ก่อน ไม่งั้นแถบจะไม่ขึ้นเลย · จอ BYD บล็อกหน้านี้ไว้ (ขึ้น \"IVI system does not support this operation\") และเสียงจาก CarPlay ก็สั่งเดินหน้า/ถอยหลังไม่ได้อยู่ดี — บนมือถือเปิดได้ปกติ"
                 ) {
                     TextButton(onClick = {
                         if (!MediaLink.openAccessSettings(context)) {
@@ -193,6 +229,38 @@ fun SettingsDialog(
             }
         }
     )
+}
+
+/** "RadarPin 0.1.0 (build 14)" — read off the installed package, so it can't drift from reality. */
+private fun appVersion(context: Context): String = runCatching {
+    val info = context.packageManager.getPackageInfo(context.packageName, 0)
+    val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        info.longVersionCode
+    } else {
+        @Suppress("DEPRECATION") info.versionCode.toLong()
+    }
+    "RadarPin ${info.versionName} (build $code)"
+}.getOrDefault("RadarPin")
+
+private val bootTimeFmt = SimpleDateFormat("d MMM HH:mm", Locale.forLanguageTag("th-TH"))
+
+/**
+ * Plain-language read-out of what the head unit did at power-up. This is the whole diagnostic: from
+ * the driver's seat every cause of "the app didn't open by itself" looks the same, and only the
+ * receiver can tell them apart — no broadcast at all vs. a broadcast whose window got blocked.
+ */
+private fun bootStatus(context: Context): String {
+    val trace = Settings.bootTrace(context)
+        ?: return "ยังไม่เคยได้รับสัญญาณบูตจากเครื่องนี้ — ถ้าดับเครื่องแล้วสตาร์ทใหม่ยังขึ้นข้อความเดิม แปลว่าจอไม่ได้ส่งสัญญาณบูตมาให้แอปเลย"
+    val at = bootTimeFmt.format(Date(trace.atMillis))
+    val what = trace.action.substringAfterLast('.')
+    val tail = when (trace.result) {
+        Settings.BOOT_OFF -> "ตอนนั้นสวิตช์ด้านบนปิดอยู่ จึงไม่ได้เปิดแอป"
+        Settings.BOOT_STARTED -> "สั่งเปิดแอปแล้ว (มีสิทธิ์แสดงทับแอปอื่นครบ)"
+        Settings.BOOT_NO_OVERLAY -> "สั่งเปิดแอปแล้ว แต่ยังไม่ได้สิทธิ์ \"แสดงทับแอปอื่น\" ระบบจึงบล็อกหน้าต่างไว้"
+        else -> "สั่งเปิดแอปไม่สำเร็จ"
+    }
+    return "$what · $at — $tail"
 }
 
 @Composable

@@ -71,6 +71,19 @@ import kotlinx.coroutines.delay
 /** Below this width the alert has to stay a full-width bar; above it, it becomes a side panel. */
 private const val RAIL_MIN_WIDTH_DP = 600
 
+/** Where a point is about to be saved, and — when it was captured from a moving car — the
+ *  direction the road runs there. */
+private data class PendingSave(val lat: Double, val lng: Double, val headingDeg: Double?)
+
+/** The heading to record with a point, or null when the car is too slow for it to mean anything:
+ *  a standing GPS invents a direction, and a wrong road axis is worse than none. */
+private fun drivingHeading(loc: android.location.Location): Double? =
+    if (loc.hasBearing() && loc.hasSpeed() && loc.speed >= LocationService.MOVING_SPEED_MPS) {
+        loc.bearing.toDouble()
+    } else {
+        null
+    }
+
 @Composable
 fun MapScreen(vm: MapViewModel = viewModel()) {
     val context = LocalContext.current
@@ -93,8 +106,9 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     // a portrait phone doesn't, so it keeps the full-width bar.
     val railBanner = LocalConfiguration.current.screenWidthDp >= RAIL_MIN_WIDTH_DP
 
-    // Coordinates for a pending "save point" dialog — from the FAB (current location) or a map long-press.
-    var pendingSave by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    // A pending "save point" dialog — from the FAB (where the car is) or a map long-press. Saving
+    // while driving also captures which way the road runs, which is free here and impossible later.
+    var pendingSave by remember { mutableStateOf<PendingSave?>(null) }
     var showList by remember { mutableStateOf(false) }
     var editingPoint by remember { mutableStateOf<AlertPoint?>(null) }
     var recenterTick by remember { mutableIntStateOf(0) }
@@ -106,17 +120,17 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     var focus by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var headingUp by remember { mutableStateOf(Settings.headingUp(context)) }
     var meIcon by remember { mutableStateOf(Settings.meIcon(context)) }
-    var bannerDismissed by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    // Shared with the service's over-other-apps card, so a ✕ in either place settles both.
+    val dismissedIds by LocationBus.dismissedIds.collectAsState()
     val radioState by RadioPlayer.state.collectAsState()
     val nowPlaying by MediaLink.nowPlaying.collectAsState()
 
-    // Watch other apps' media sessions while we're on screen. With notification access we get live
-    // callbacks and the track name; without it we poll for "is media actually playing" so the bar
-    // still appears the moment music starts — just without a title.
+    // Watch other apps' media sessions while we're on screen. Reading them needs notification
+    // access, so keep looking until it's granted — until then there is no session to drive and
+    // therefore no bar (see MediaLink: a bar we can't fully control is worse than none).
     LaunchedEffect(Unit) {
         MediaLink.start(context)
         while (!MediaLink.hasAccess(context)) {
-            MediaLink.refreshWithoutAccess(context)
             delay(2000)
             MediaLink.start(context) // picks up the moment access is granted
         }
@@ -132,9 +146,6 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     var tripSummary by remember { mutableStateOf<Trip?>(null) }
     var showTripHistory by remember { mutableStateOf(false) }
 
-    // Reset the in-app banner dismissal once you leave all alert zones, so it re-shows next time.
-    LaunchedEffect(activeIds) { if (activeIds.isEmpty()) bannerDismissed = emptySet() }
-
     Box(Modifier.fillMaxSize()) {
         MapLibreMap(
             points = points,
@@ -145,7 +156,9 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             recenterTick = recenterTick,
             zoomInTick = zoomInTick,
             zoomOutTick = zoomOutTick,
-            onMapLongClick = { lat, lng -> pendingSave = lat to lng },
+            // A spot picked off the map is not where the car is, so there's no road direction to
+            // record — that point warns from every direction, as points always did.
+            onMapLongClick = { lat, lng -> pendingSave = PendingSave(lat, lng, null) },
             onMarkerClick = { id ->
                 points.find { it.id == id }?.let {
                     selectedPoint = it
@@ -218,7 +231,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             }
 
             val activePoints = points.filter { it.id in activeIds }
-            if (activePoints.isNotEmpty() && activeIds != bannerDismissed) {
+            if (activePoints.isNotEmpty() && activeIds != dismissedIds) {
                 AlertBanner(
                     points = activePoints,
                     distances = alertDistances,
@@ -227,7 +240,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                         selectedPoint = p
                         focus = p.lat to p.lng
                     },
-                    onDismiss = { bannerDismissed = activeIds },
+                    onDismiss = { LocationBus.dismissAlerts(activeIds) },
                     modifier = if (railBanner) {
                         // Clear of the right-hand button column, which reaches up this far on a
                         // tall head-unit screen.
@@ -280,7 +293,9 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 Text("จุด")
             }
             ExtendedFloatingActionButton(onClick = {
-                location?.let { pendingSave = it.latitude to it.longitude }
+                location?.let { loc ->
+                    pendingSave = PendingSave(loc.latitude, loc.longitude, drivingHeading(loc))
+                }
             }) {
                 Text("บันทึกจุดนี้")
             }
@@ -352,13 +367,14 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         }
     }
 
-    pendingSave?.let { (lat, lng) ->
+    pendingSave?.let { pending ->
         SavePointDialog(
-            lat = lat,
-            lng = lng,
+            lat = pending.lat,
+            lng = pending.lng,
+            headingDeg = pending.headingDeg,
             onDismiss = { pendingSave = null },
-            onSave = { name, type, radius, alertEnabled, sound, infoMode ->
-                vm.savePoint(name, type, lat, lng, radius, alertEnabled, sound, infoMode)
+            onSave = { form ->
+                vm.savePoint(form, pending.lat, pending.lng, pending.headingDeg)
                 pendingSave = null
             }
         )
@@ -511,7 +527,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                         vm.cancelTrip()
                     }
                 }
-                bannerDismissed = emptySet()
+                LocationBus.dismissAlerts(emptySet())
                 showSim = false
             },
             onDismiss = { showSim = false }

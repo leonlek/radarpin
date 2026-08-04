@@ -8,7 +8,7 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [AlertPoint::class, Trip::class], version = 5, exportSchema = false)
+@Database(entities = [AlertPoint::class, Trip::class], version = 6, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun alertPointDao(): AlertPointDao
@@ -51,13 +51,24 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Nullable on purpose: "we don't know which way this road runs" is a real state,
+                // and every point saved before this existed is in it.
+                db.execSQL("ALTER TABLE alert_points ADD COLUMN headingDeg REAL")
+                db.execSQL("ALTER TABLE alert_points ADD COLUMN oneWay INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "byd-map-cam.db"
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                ).addMigrations(
+                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6
+                )
                     .build().also { INSTANCE = it }
             }
     }

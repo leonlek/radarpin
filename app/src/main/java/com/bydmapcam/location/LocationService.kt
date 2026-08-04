@@ -59,7 +59,6 @@ class LocationService : LifecycleService(), LocationListener {
     private var overlayDistance: TextView? = null
     private var overlayName: TextView? = null
     private var overlayNext: TextView? = null
-    private var overlayDismissedFor: Set<Long> = emptySet()
 
     /** Fake card pushed in from the simulator so the over-other-apps look can be checked at a desk. */
     @Volatile
@@ -70,6 +69,10 @@ class LocationService : LifecycleService(), LocationListener {
 
     /** Parked inside an alert zone → alerts muted until the car drives off again. */
     private var parked = false
+
+    /** When each point last raised a warning, so a U-turn doesn't raise the same one twice.
+     *  In memory only: the service outlives any single drive, and a restart is a fresh road. */
+    private val lastAlertAt = mutableMapOf<Long, Long>()
 
     override fun onCreate() {
         super.onCreate()
@@ -91,7 +94,13 @@ class LocationService : LifecycleService(), LocationListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
-        startAsForeground()
+        if (!startAsForeground()) {
+            // Not allowed to run headless at this moment (see startAsForeground). Stop cleanly —
+            // a service that never reaches the foreground is killed by the system anyway, and
+            // MainActivity starts us again the instant it is on screen.
+            stopSelf()
+            return START_NOT_STICKY
+        }
         when (intent?.action) {
             ACTION_SIM_OVERLAY -> {
                 simOverlay = OverlayContent(
@@ -112,13 +121,24 @@ class LocationService : LifecycleService(), LocationListener {
         return START_STICKY
     }
 
-    private fun startAsForeground() {
+    /**
+     * @return false when the system refused to let us go foreground.
+     *
+     * Android 14+ rejects a *location*-type foreground service started while the app is in the
+     * background — a boot broadcast being the case that matters here — and it rejects it by throwing
+     * SecurityException out of [startForeground]. Uncaught, that killed the whole process at boot,
+     * taking down the window the boot receiver had just asked for: "open the app when the car
+     * starts" turned into "nothing happens at all". Refusal is a normal outcome, not a crash.
+     */
+    private fun startAsForeground(): Boolean {
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-        } else {
-            startForeground(NOTIF_ID, notification)
-        }
+        return runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            } else {
+                startForeground(NOTIF_ID, notification)
+            }
+        }.isSuccess
     }
 
     private fun requestUpdates() {
@@ -154,6 +174,7 @@ class LocationService : LifecycleService(), LocationListener {
     private fun recompute() {
         val loc = lastLocation ?: return
         updateParked(loc)
+        val now = System.currentTimeMillis()
         val nowInside = mutableSetOf<Long>()
         val nowInfo = mutableSetOf<Long>()
         val distances = mutableMapOf<Long, Int>()
@@ -182,24 +203,58 @@ class LocationService : LifecycleService(), LocationListener {
             if (parked) continue
             if (d > p.radiusM) continue
 
-            // Direction filter: suppress points we're clearly driving AWAY from (behind us —
-            // already passed, or travelling the opposite way). Only applies while moving.
+            // Geometry filters, all of which need a trustworthy heading, so all of them only apply
+            // while genuinely moving — and all under the one setting that says "use where I'm
+            // pointing to decide what to warn about".
             if (directionAware && moving) {
                 val bearingToPoint = GeoUtils.bearingDeg(loc.latitude, loc.longitude, p.lat, p.lng)
                 val off = GeoUtils.angleDiffDeg(loc.bearing.toDouble(), bearingToPoint)
+                // Behind us: already passed, or coming the other way.
                 if (off > AWAY_ANGLE_DEG) continue
+                // Beside us: inside the radius but off the line we're driving, which is what a
+                // camera on the crossing street looks like. The allowance widens with distance
+                // because a bend puts a point genuinely on our road well off the current heading,
+                // and missing a real camera is worse than warning about one we'll drive past.
+                if (GeoUtils.crossTrackMeters(d, off) > corridorAt(d)) continue
+                // The road's own axis, for points saved while driving it. Matched BOTH ways by
+                // default — the way home passes the same camera from the other side — unless the
+                // driver has marked it as watching one carriageway only.
+                val axis = p.headingDeg
+                if (axis != null) {
+                    val offAxis = GeoUtils.angleDiffDeg(loc.bearing.toDouble(), axis)
+                    val onAxis = if (p.oneWay) {
+                        offAxis <= AXIS_TOLERANCE_DEG
+                    } else {
+                        offAxis <= AXIS_TOLERANCE_DEG || offAxis >= 180.0 - AXIS_TOLERANCE_DEG
+                    }
+                    if (!onAxis) continue
+                }
             }
+
+            // A fresh warning for a point warned about minutes ago is the U-turn case: same camera,
+            // same stretch of road, nothing new to tell the driver. An hour later on the way home
+            // it has expired and warns properly. Points already being warned about are untouched —
+            // that's one continuing alert, not a new one.
+            val warnedRecently = lastAlertAt[p.id]?.let { now - it < RE_ALERT_COOLDOWN_MS } == true
+            if (p.id !in insideIds && warnedRecently) continue
 
             nowInside.add(p.id)
             distances[p.id] = d.toInt()
 
             // Beep once on the outside -> inside transition (single beep, no escalation).
-            if (p.id !in insideIds && p.alertSound) {
-                Beeper.beep()
-                if (Settings.ttsEnabled(this)) {
-                    Speaker.speak("${p.type.label}ข้างหน้า ${roundDist(d)} เมตร")
+            if (p.id !in insideIds) {
+                lastAlertAt[p.id] = now
+                if (p.alertSound) {
+                    Beeper.beep()
+                    if (Settings.ttsEnabled(this)) {
+                        Speaker.speak("${p.type.label}ข้างหน้า ${roundDist(d)} เมตร")
+                    }
                 }
             }
+        }
+        // Expired entries are just noise; drop them in a batch rather than scanning every second.
+        if (lastAlertAt.size > COOLDOWN_MAP_LIMIT) {
+            lastAlertAt.entries.removeAll { now - it.value >= RE_ALERT_COOLDOWN_MS }
         }
 
         insideIds = nowInside
@@ -240,6 +295,9 @@ class LocationService : LifecycleService(), LocationListener {
             .putBoolean(KEY_PARKED, value).apply()
     }
 
+    /** How far off our path a point may sit and still count as "on this road", at distance [d]. */
+    private fun corridorAt(d: Double): Double = maxOf(CORRIDOR_MIN_M, d * CORRIDOR_FRACTION)
+
     /** Round to a spoken-friendly distance (100s far out, 50s mid, 10s close). */
     private fun roundDist(d: Double): Int = when {
         d >= 300 -> (d / 100).toInt() * 100
@@ -260,13 +318,13 @@ class LocationService : LifecycleService(), LocationListener {
     /** Floating red card drawn over other apps while backgrounded and inside an alert. */
     private fun updateOverlay() {
         val active = insideIds
-        if (active.isEmpty()) overlayDismissedFor = emptySet()
         val content = simOverlay ?: liveOverlayContent()
         val show = Settings.overlayEnabled(this) &&
             Settings.canDrawOverlays(this) &&
             content != null &&
             !AppState.inForeground.value &&
-            (simOverlay != null || active != overlayDismissedFor)
+            // Shared with the in-app rail: one ✕ anywhere silences this alert everywhere.
+            (simOverlay != null || active != LocationBus.dismissedIds.value)
         if (!show) {
             hideOverlay()
             return
@@ -305,7 +363,7 @@ class LocationService : LifecycleService(), LocationListener {
 
     /** Hide the banner for the current alert without opening the app. */
     private fun dismissOverlay() {
-        overlayDismissedFor = insideIds
+        LocationBus.dismissAlerts(insideIds)
         simOverlay = null
         hideOverlay()
     }
@@ -463,8 +521,14 @@ class LocationService : LifecycleService(), LocationListener {
         private const val CHANNEL_ID = "location"
         /** How close an INFO point gets before its icon+name pops up (then closes past it). */
         const val INFO_DISTANCE_M = 200.0
-        private const val MOVING_SPEED_MPS = 2.5f  // ~9 km/h; below this, heading is unreliable
-        private const val AWAY_ANGLE_DEG = 115.0   // point is behind us -> driving away -> suppress
+        /** ~9 km/h; below this a GPS heading is noise, so every direction filter stands down. */
+        const val MOVING_SPEED_MPS = 2.5f
+        private const val AWAY_ANGLE_DEG = 75.0    // point is off to the side/behind -> suppress
+        private const val CORRIDOR_MIN_M = 40.0    // how far off our path a point may still sit…
+        private const val CORRIDOR_FRACTION = 0.2  // …growing with distance, so bends don't go quiet
+        private const val AXIS_TOLERANCE_DEG = 50.0 // heading vs the road axis saved with the point
+        private const val RE_ALERT_COOLDOWN_MS = 5 * 60_000L // same point, same few minutes = once
+        private const val COOLDOWN_MAP_LIMIT = 64  // prune the cooldown table past this many points
         private const val PARKED_KMH = 2f          // below this the car is standing still
         private const val UNPARK_KMH = 10f         // above this it has genuinely driven off
         private const val PARKED_AFTER_MS = 120_000L // stopped this long = parked -> mute alerts

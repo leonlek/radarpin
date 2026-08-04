@@ -3,7 +3,6 @@ package com.bydmapcam.media
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaController
@@ -13,7 +12,6 @@ import android.os.Build
 import android.provider.Settings
 import android.view.KeyEvent
 import androidx.core.app.NotificationManagerCompat
-import com.bydmapcam.radio.RadioPlayer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,15 +20,13 @@ import kotlinx.coroutines.flow.asStateFlow
  * Reads and drives whatever else is playing audio on the head unit (Spotify, YouTube Music, the
  * stock player, a phone over Bluetooth…).
  *
- * Deliberately two-tier:
- *  - **transport always works** — media key events go to whichever app owns the media session, no
- *    permission needed, exactly like the steering-wheel buttons;
- *  - **the track title needs "notification access"** ([hasAccess]) because that is the only way
- *    Android lets one app read another app's [MediaController]. Without it the bar still appears
- *    while media is genuinely playing — just as buttons, with no title.
- *
- * Note this can't reach audio that never becomes an Android media session — most importantly
- * CarPlay, which is a separate projection channel owned by the iPhone.
+ * The bar appears only when we can genuinely read a [MediaController], which needs the user to
+ * grant "notification access" ([hasAccess]) — the only way Android lets one app see another's
+ * media session. That gate is deliberate: sound can be coming out of the speakers from something
+ * we cannot control at all, above all **CarPlay**, a projection channel owned by the iPhone rather
+ * than an Android session. Guessing "something is playing" from [AudioManager] used to be enough to
+ * show the bar, but then ⏮/⏭ silently did nothing and only play/pause happened to get through — so
+ * a bar we can't fully drive is now no bar at all.
  */
 object MediaLink {
     data class NowPlaying(
@@ -110,30 +106,6 @@ object MediaLink {
             mgr.addOnActiveSessionsChangedListener(sessionsListener, component)
             pickSession(mgr.getActiveSessions(component))
         }
-    }
-
-    /**
-     * Without notification access there's no session to read, so fall back to asking the audio
-     * system whether anything is *actually* rendering media right now. Deliberately not
-     * [AudioManager.isMusicActive]: a head unit tends to hold a music-stream player open forever,
-     * which made the bar appear the moment the app launched. Checking the active playback
-     * configurations for a real USAGE_MEDIA player is the closest thing to "sound is coming out".
-     */
-    fun refreshWithoutAccess(context: Context) {
-        if (controller != null) return
-        // Our own radio also counts as playback — don't offer to "control" ourselves.
-        val ours = RadioPlayer.state.value != RadioPlayer.State.STOPPED &&
-            RadioPlayer.state.value != RadioPlayer.State.ERROR
-        val audio = context.getSystemService(AudioManager::class.java)
-        val playing = when {
-            ours || audio == null -> false
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ->
-                audio.activePlaybackConfigurations.any {
-                    it.audioAttributes.usage == AudioAttributes.USAGE_MEDIA
-                }
-            else -> audio.isMusicActive
-        }
-        _nowPlaying.value = if (playing) NowPlaying(null, null, playing = true) else null
     }
 
     fun stop() {

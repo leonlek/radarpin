@@ -21,12 +21,32 @@ object LocationBus {
     private val _alertDistances = MutableStateFlow<Map<Long, Int>>(emptyMap())
     val alertDistances: StateFlow<Map<Long, Int>> = _alertDistances
 
+    /**
+     * The alert the driver has waved away with ✕, held here rather than in either UI because the
+     * in-app rail and the over-other-apps card are one alert seen from two places. Dismissing the
+     * rail and then meeting the same warning again on the next press of Home was the bug this
+     * fixes. Being the exact active set, it stops matching as soon as the warned-about points
+     * change, which is what re-arms the banner for the next camera.
+     */
+    private val _dismissedIds = MutableStateFlow<Set<Long>>(emptySet())
+    val dismissedIds: StateFlow<Set<Long>> = _dismissedIds
+
     fun updateLocation(loc: Location) {
         _location.value = loc
     }
 
     fun updateActiveAlerts(ids: Set<Long>) {
+        // Compared first so an unchanged set doesn't wipe a dismissal on every GPS tick — which
+        // would also undo the simulator's, where the real active set is empty the whole time.
+        if (_activeAlertIds.value == ids) return
         _activeAlertIds.value = ids
+        // Out of every zone: forget the ✕ so the next one warns properly.
+        if (ids.isEmpty()) _dismissedIds.value = emptySet()
+    }
+
+    /** Silence the current alert in both places at once. [ids] is the active set being waved away. */
+    fun dismissAlerts(ids: Set<Long>) {
+        _dismissedIds.value = ids
     }
 
     fun updateInfoActive(ids: Set<Long>) {

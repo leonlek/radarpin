@@ -47,6 +47,18 @@ import com.bydmapcam.location.GeoUtils
 import com.bydmapcam.location.LocationService
 
 /** Shared create/edit form for a saved point. */
+/** Everything the point form produces — a bag, because seven positional lambda arguments is a
+ *  swap waiting to happen the next time one is added. */
+data class PointFormResult(
+    val name: String,
+    val type: PointType,
+    val radiusM: Int,
+    val alertEnabled: Boolean,
+    val alertSound: Boolean,
+    val infoMode: Boolean,
+    val oneWay: Boolean
+)
+
 @Composable
 private fun PointFormDialog(
     title: String,
@@ -57,10 +69,13 @@ private fun PointFormDialog(
     initialAlertEnabled: Boolean,
     initialSound: Boolean,
     initialInfoMode: Boolean,
+    initialOneWay: Boolean,
+    /** The road's axis, if it was captured — the one-way choice only exists when we know it. */
+    headingDeg: Double?,
     lat: Double,
     lng: Double,
     onDismiss: () -> Unit,
-    onConfirm: (name: String, type: PointType, radiusM: Int, alertEnabled: Boolean, alertSound: Boolean, infoMode: Boolean) -> Unit
+    onConfirm: (PointFormResult) -> Unit
 ) {
     var name by remember { mutableStateOf(initialName) }
     var type by remember { mutableStateOf(initialType) }
@@ -68,12 +83,23 @@ private fun PointFormDialog(
     var alertEnabled by remember { mutableStateOf(initialAlertEnabled) }
     var sound by remember { mutableStateOf(initialSound) }
     var infoMode by remember { mutableStateOf(initialInfoMode) }
+    var oneWay by remember { mutableStateOf(initialOneWay) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(onClick = {
-                onConfirm(name, type, radius.toInt(), alertEnabled, sound, infoMode)
+                onConfirm(
+                    PointFormResult(
+                        name = name,
+                        type = type,
+                        radiusM = radius.toInt(),
+                        alertEnabled = alertEnabled,
+                        alertSound = sound,
+                        infoMode = infoMode,
+                        oneWay = oneWay
+                    )
+                )
             }) { Text(confirmLabel) }
         },
         dismissButton = {
@@ -146,6 +172,20 @@ private fun PointFormDialog(
                             Text("เตือนด้วยเสียง", modifier = Modifier.weight(1f))
                             Switch(checked = sound, onCheckedChange = { sound = it })
                         }
+                        // Only offered when the road's direction was captured, and off by default:
+                        // both directions is the safe reading of a camera we know nothing about.
+                        if (headingDeg != null) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("เตือนเฉพาะทิศที่บันทึก")
+                                    Text(
+                                        "กล้องจับทางเดียว — ขากลับจะไม่เตือน (บันทึกไว้ทิศ ${headingDeg.toInt()}°)",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                                Switch(checked = oneWay, onCheckedChange = { oneWay = it })
+                            }
+                        }
                     }
                 } else {
                     Text(
@@ -166,8 +206,10 @@ private fun PointFormDialog(
 fun SavePointDialog(
     lat: Double,
     lng: Double,
+    /** Where the car was pointing when this was captured, or null if it wasn't moving. */
+    headingDeg: Double?,
     onDismiss: () -> Unit,
-    onSave: (name: String, type: PointType, radiusM: Int, alertEnabled: Boolean, alertSound: Boolean, infoMode: Boolean) -> Unit
+    onSave: (PointFormResult) -> Unit
 ) {
     PointFormDialog(
         title = "บันทึกจุด",
@@ -178,6 +220,8 @@ fun SavePointDialog(
         initialAlertEnabled = PointType.SPEED_CAMERA.defaultAlert,
         initialSound = true,
         initialInfoMode = false,
+        initialOneWay = false,
+        headingDeg = headingDeg,
         lat = lat,
         lng = lng,
         onDismiss = onDismiss,
@@ -200,18 +244,21 @@ fun EditPointDialog(
         initialAlertEnabled = point.alertEnabled,
         initialSound = point.alertSound,
         initialInfoMode = point.infoMode,
+        initialOneWay = point.oneWay,
+        headingDeg = point.headingDeg,
         lat = point.lat,
         lng = point.lng,
         onDismiss = onDismiss,
-        onConfirm = { name, type, radiusM, alertEnabled, alertSound, infoMode ->
+        onConfirm = { form ->
             onSave(
                 point.copy(
-                    name = name.ifBlank { type.label },
-                    type = type,
-                    radiusM = radiusM,
-                    alertEnabled = alertEnabled,
-                    alertSound = alertSound,
-                    infoMode = infoMode
+                    name = form.name.ifBlank { form.type.label },
+                    type = form.type,
+                    radiusM = form.radiusM,
+                    alertEnabled = form.alertEnabled,
+                    alertSound = form.alertSound,
+                    infoMode = form.infoMode,
+                    oneWay = form.oneWay
                 )
             )
         }
@@ -384,5 +431,9 @@ fun pointDetail(p: AlertPoint): String = when {
     // These never ring, so don't describe a radius they don't use.
     p.infoMode || p.type.popsOnly ->
         "${p.type.label} • เด้งไอคอนเมื่อใกล้ ${LocationService.INFO_DISTANCE_M.toInt()} ม."
-    else -> "${p.type.label} • เตือน ${p.radiusM} ม. • ${if (p.alertSound) "เสียง" else "เงียบ"}"
+    else -> buildString {
+        append("${p.type.label} • เตือน ${p.radiusM} ม. • ${if (p.alertSound) "เสียง" else "เงียบ"}")
+        // Only worth saying when it changes the behaviour; two-way matching is what you'd assume.
+        if (p.oneWay && p.headingDeg != null) append(" • ทางเดียว (ทิศ ${p.headingDeg.toInt()}°)")
+    }
 }

@@ -34,4 +34,15 @@ object GeoUtils {
     /** Smallest absolute difference between two compass bearings, 0..180 degrees. */
     fun angleDiffDeg(a: Double, b: Double): Double =
         abs((a - b + 540.0) % 360.0 - 180.0)
+
+    /**
+     * How far off the line we're driving a point sits, in meters — the perpendicular leg of the
+     * triangle whose hypotenuse is [distanceM] and whose apex angle is [offAngleDeg] (the angle
+     * between our heading and the direction to the point).
+     *
+     * This is what separates "the camera on my road, 300 m ahead" from "the camera on the street
+     * crossing mine": both can be inside the radius, but only one is near the path.
+     */
+    fun crossTrackMeters(distanceM: Double, offAngleDeg: Double): Double =
+        distanceM * sin(Math.toRadians(offAngleDeg))
 }

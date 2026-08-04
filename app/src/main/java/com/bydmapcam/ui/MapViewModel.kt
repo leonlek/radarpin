@@ -51,27 +51,20 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun savePoint(
-        name: String,
-        type: PointType,
-        lat: Double,
-        lng: Double,
-        radiusM: Int,
-        alertEnabled: Boolean,
-        alertSound: Boolean,
-        infoMode: Boolean
-    ) {
+    fun savePoint(form: PointFormResult, lat: Double, lng: Double, headingDeg: Double?) {
         viewModelScope.launch {
             repo.add(
                 AlertPoint(
-                    name = name.ifBlank { type.label },
-                    type = type,
+                    name = form.name.ifBlank { form.type.label },
+                    type = form.type,
                     lat = lat,
                     lng = lng,
-                    radiusM = radiusM,
-                    alertEnabled = alertEnabled,
-                    alertSound = alertSound,
-                    infoMode = infoMode,
+                    radiusM = form.radiusM,
+                    alertEnabled = form.alertEnabled,
+                    alertSound = form.alertSound,
+                    infoMode = form.infoMode,
+                    headingDeg = headingDeg,
+                    oneWay = form.oneWay,
                     createdAt = System.currentTimeMillis()
                 )
             )
