@@ -15,6 +15,7 @@ object Settings {
     private const val KEY_BOOT_AT = "boot_last_at"
     private const val KEY_BOOT_ACTION = "boot_last_action"
     private const val KEY_BOOT_RESULT = "boot_last_result"
+    private const val KEY_ALIVE_AT = "service_alive_at"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
@@ -58,6 +59,10 @@ object Settings {
      */
     data class BootTrace(val atMillis: Long, val action: String, val result: String)
 
+    /** A head unit that only sleeps never broadcasts a boot, so the screen waking is the other
+     *  way we learn the car has been switched on. Recorded through the same trace. */
+    const val WAKE_ACTION = "จอตื่นจากพัก"
+
     const val BOOT_OFF = "off"               // broadcast arrived, but the toggle was off
     const val BOOT_STARTED = "started"       // asked for the window while holding the overlay permission
     const val BOOT_NO_OVERLAY = "no_overlay" // asked without it — Android drops the start, silently
@@ -83,6 +88,16 @@ object Settings {
             .putString(KEY_BOOT_RESULT, result)
             .commit()
     }
+
+    /**
+     * A heartbeat from the alert service. It answers the question that decides whether waking the
+     * app on power-up is even possible: did our process survive the car being off, or does the
+     * head unit kill everything — in which case only the ROM's own auto-start list can help.
+     */
+    fun recordAlive(context: Context) =
+        prefs(context).edit().putLong(KEY_ALIVE_AT, System.currentTimeMillis()).apply()
+
+    fun aliveAt(context: Context): Long = prefs(context).getLong(KEY_ALIVE_AT, 0L)
 
     fun meIcon(context: Context): MeIcon {
         val name = prefs(context).getString(KEY_ME_ICON, null) ?: return MeIcon.ARROW

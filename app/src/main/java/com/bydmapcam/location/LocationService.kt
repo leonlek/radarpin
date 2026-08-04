@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.location.Location
@@ -38,8 +39,10 @@ import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.data.PointRepository
 import com.bydmapcam.data.PointType
 import com.bydmapcam.settings.Settings
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
 
 private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
 private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -74,6 +77,27 @@ class LocationService : LifecycleService(), LocationListener {
      *  In memory only: the service outlives any single drive, and a restart is a fresh road. */
     private val lastAlertAt = mutableMapOf<Long, Long>()
 
+    /** When the screen last went dark, 0 = it's on (or we never saw it go off). */
+    private var screenOffAt = 0L
+
+    /** When a wake last opened the app, so the second signal of the same wake-up is ignored. */
+    private var lastWakeOpenAt = 0L
+
+    /**
+     * The other way a car tells us it has been switched on. A head unit that suspends instead of
+     * powering down never broadcasts a boot — the driver turns the key and the same Android that
+     * was running before simply lights the screen again — so BOOT_COMPLETED alone can never open
+     * the app there. A screen that has been dark for a while is that moment.
+     */
+    private val wakeReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                Intent.ACTION_SCREEN_OFF -> screenOffAt = System.currentTimeMillis()
+                Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> onScreenWake()
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         repository = PointRepository(this)
@@ -90,6 +114,55 @@ class LocationService : LifecycleService(), LocationListener {
         AppState.inForeground
             .onEach { updateOverlay() }
             .launchIn(lifecycleScope)
+
+        // Registered at runtime, not in the manifest: since Android 8 a manifest receiver is not
+        // given SCREEN_ON at all, and this only means anything while we're running anyway.
+        registerReceiver(
+            wakeReceiver,
+            IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_USER_PRESENT)
+            }
+        )
+
+        // A heartbeat the settings screen reads back. Whether this survives the car being off is
+        // the whole question behind "auto-start does nothing" on a head unit.
+        lifecycleScope.launch {
+            while (true) {
+                Settings.recordAlive(this@LocationService)
+                delay(ALIVE_TICK_MS)
+            }
+        }
+    }
+
+    /**
+     * Screen woke after a long sleep — on a head unit that is the car being switched on. Brief
+     * blanks (the panel dimming out at a red light, the driver tapping it off for a moment) are
+     * deliberately ignored: yanking someone out of the app they were using is worse than not
+     * opening at all.
+     */
+    private fun onScreenWake() {
+        val sleptFor = if (screenOffAt == 0L) Long.MAX_VALUE else System.currentTimeMillis() - screenOffAt
+        android.util.Log.i(
+            "RadarPinWake",
+            "wake auto=${Settings.autoStartOnBoot(this)} fg=${AppState.inForeground.value} sleptMs=$sleptFor"
+        )
+        if (!Settings.autoStartOnBoot(this)) return
+        if (AppState.inForeground.value) return
+        if (sleptFor < WAKE_MIN_SLEEP_MS) return
+        // SCREEN_ON and USER_PRESENT both land within a second of the same wake-up; one of them is
+        // the reason we're here and the other must not start the activity a second time.
+        val now = System.currentTimeMillis()
+        if (now - lastWakeOpenAt < WAKE_DEBOUNCE_MS) return
+        lastWakeOpenAt = now
+        screenOffAt = 0L
+        openApp()
+        Settings.recordBootTrace(
+            this,
+            Settings.WAKE_ACTION,
+            if (Settings.canDrawOverlays(this)) Settings.BOOT_STARTED else Settings.BOOT_NO_OVERLAY
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -490,6 +563,7 @@ class LocationService : LifecycleService(), LocationListener {
 
     override fun onDestroy() {
         runCatching { locationManager.removeUpdates(this) }
+        runCatching { unregisterReceiver(wakeReceiver) }
         hideOverlay()
         super.onDestroy()
     }
@@ -529,6 +603,10 @@ class LocationService : LifecycleService(), LocationListener {
         private const val AXIS_TOLERANCE_DEG = 50.0 // heading vs the road axis saved with the point
         private const val RE_ALERT_COOLDOWN_MS = 5 * 60_000L // same point, same few minutes = once
         private const val COOLDOWN_MAP_LIMIT = 64  // prune the cooldown table past this many points
+        /** Dark this long before a wake counts as "the car was switched off and on again". */
+        private const val WAKE_MIN_SLEEP_MS = 2 * 60_000L
+        private const val WAKE_DEBOUNCE_MS = 10_000L
+        private const val ALIVE_TICK_MS = 60_000L
         private const val PARKED_KMH = 2f          // below this the car is standing still
         private const val UNPARK_KMH = 10f         // above this it has genuinely driven off
         private const val PARKED_AFTER_MS = 120_000L // stopped this long = parked -> mute alerts

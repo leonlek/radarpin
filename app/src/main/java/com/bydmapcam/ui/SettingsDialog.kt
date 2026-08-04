@@ -164,7 +164,7 @@ fun SettingsDialog(
                 HorizontalDivider()
                 SettingRow(
                     title = "เปิดแอปเองตอนสตาร์ทรถ",
-                    subtitle = "เปิดแอปอัตโนมัติเมื่อจอบูตเสร็จ (ต้องอนุญาต \"แสดงทับแอปอื่น\")"
+                    subtitle = "เปิดแอปเมื่อจอบูตเสร็จ หรือจอตื่นหลังดับไปเกิน 2 นาที (ต้องอนุญาต \"แสดงทับแอปอื่น\")"
                 ) {
                     Switch(
                         checked = autoBoot,
@@ -175,7 +175,11 @@ fun SettingsDialog(
                     )
                 }
                 SettingRow(
-                    title = "สัญญาณบูตล่าสุด",
+                    title = "บริการเฝ้าเตือน",
+                    subtitle = aliveStatus(context)
+                ) {}
+                SettingRow(
+                    title = "สัญญาณเปิดแอปล่าสุด",
                     subtitle = bootStatus(context)
                 ) {
                     if (!Settings.canDrawOverlays(context)) {
@@ -245,13 +249,25 @@ private fun appVersion(context: Context): String = runCatching {
 private val bootTimeFmt = SimpleDateFormat("d MMM HH:mm", Locale.forLanguageTag("th-TH"))
 
 /**
+ * Whether the alert service was running through the last stretch. This is the question under the
+ * question: if the heartbeat stops when the car is switched off and only resumes when the app is
+ * opened by hand, nothing in the app can wake it — no broadcast is coming, and only the head
+ * unit's own auto-start list can help.
+ */
+private fun aliveStatus(context: Context): String {
+    val at = Settings.aliveAt(context)
+    if (at == 0L) return "ยังไม่เคยรายงานตัว — เปิดแอปค้างไว้สักครู่แล้วดูใหม่"
+    return "ทำงานล่าสุด ${bootTimeFmt.format(Date(at))} · ถ้าเวลานี้หยุดตอนดับเครื่องแล้วมาเดินต่อตอนเปิดแอปเอง แปลว่าจอฆ่าแอปตอนดับ"
+}
+
+/**
  * Plain-language read-out of what the head unit did at power-up. This is the whole diagnostic: from
  * the driver's seat every cause of "the app didn't open by itself" looks the same, and only the
  * receiver can tell them apart — no broadcast at all vs. a broadcast whose window got blocked.
  */
 private fun bootStatus(context: Context): String {
     val trace = Settings.bootTrace(context)
-        ?: return "ยังไม่เคยได้รับสัญญาณบูตจากเครื่องนี้ — ถ้าดับเครื่องแล้วสตาร์ทใหม่ยังขึ้นข้อความเดิม แปลว่าจอไม่ได้ส่งสัญญาณบูตมาให้แอปเลย"
+        ?: return "ยังไม่เคยได้รับทั้งสัญญาณบูตและสัญญาณจอตื่น — ถ้าดับเครื่องแล้วสตาร์ทใหม่ยังขึ้นข้อความเดิม แปลว่าจอฆ่าแอปตอนดับเครื่อง ต้องไปเปิดในรายการ \"เปิดแอปอัตโนมัติ\" ของตัวจอเอง"
     val at = bootTimeFmt.format(Date(trace.atMillis))
     val what = trace.action.substringAfterLast('.')
     val tail = when (trace.result) {
