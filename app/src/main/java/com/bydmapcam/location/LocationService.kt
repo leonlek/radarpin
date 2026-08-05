@@ -10,7 +10,9 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.hardware.display.DisplayManager
 import android.location.Location
+import android.view.Display
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
@@ -51,6 +53,7 @@ private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 class LocationService : LifecycleService(), LocationListener {
 
     private lateinit var locationManager: LocationManager
+    private lateinit var displayManager: DisplayManager
     private lateinit var repository: PointRepository
 
     @Volatile
@@ -92,9 +95,24 @@ class LocationService : LifecycleService(), LocationListener {
     private val wakeReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
-                Intent.ACTION_SCREEN_OFF -> screenOffAt = System.currentTimeMillis()
+                Intent.ACTION_SCREEN_OFF -> onScreenOff()
                 Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> onScreenWake()
             }
+        }
+    }
+
+    /**
+     * The same question asked of the display itself. A head unit can cut the panel while Android
+     * never sleeps — no SCREEN_OFF, no SCREEN_ON, nothing to wait for — and in that case the
+     * display's own state is the only place the change shows up.
+     */
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {}
+        override fun onDisplayRemoved(displayId: Int) {}
+        override fun onDisplayChanged(displayId: Int) {
+            if (displayId != Display.DEFAULT_DISPLAY) return
+            val on = displayManager.getDisplay(displayId)?.state == Display.STATE_ON
+            if (on) onScreenWake() else onScreenOff()
         }
     }
 
@@ -125,6 +143,8 @@ class LocationService : LifecycleService(), LocationListener {
                 addAction(Intent.ACTION_USER_PRESENT)
             }
         )
+        displayManager = getSystemService(DisplayManager::class.java)
+        runCatching { displayManager.registerDisplayListener(displayListener, null) }
 
         // A heartbeat the settings screen reads back. Whether this survives the car being off is
         // the whole question behind "auto-start does nothing" on a head unit.
@@ -142,27 +162,42 @@ class LocationService : LifecycleService(), LocationListener {
      * deliberately ignored: yanking someone out of the app they were using is worse than not
      * opening at all.
      */
+    private fun onScreenOff() {
+        screenOffAt = System.currentTimeMillis()
+        // Recorded so the settings screen can say whether this unit reports a dark screen at all.
+        Settings.recordScreenOff(this)
+    }
+
     private fun onScreenWake() {
         val sleptFor = if (screenOffAt == 0L) Long.MAX_VALUE else System.currentTimeMillis() - screenOffAt
         android.util.Log.i(
             "RadarPinWake",
             "wake auto=${Settings.autoStartOnBoot(this)} fg=${AppState.inForeground.value} sleptMs=$sleptFor"
         )
-        if (!Settings.autoStartOnBoot(this)) return
-        if (AppState.inForeground.value) return
         if (sleptFor < WAKE_MIN_SLEEP_MS) return
-        // SCREEN_ON and USER_PRESENT both land within a second of the same wake-up; one of them is
-        // the reason we're here and the other must not start the activity a second time.
+        // Only forget how long it was dark once that fact has been spent on an actual open —
+        // otherwise a call swallowed by the debounce would throw away the evidence.
+        if (autoOpen(Settings.WAKE_ACTION)) screenOffAt = 0L
+    }
+
+    /**
+     * Open the app because [reason] says the car is being used again. Guarded by the driver's
+     * setting, by the app not already being on screen, and by a debounce — SCREEN_ON and
+     * USER_PRESENT arrive together on one wake-up, and only one of them should start anything.
+     */
+    private fun autoOpen(reason: String): Boolean {
+        if (!Settings.autoStartOnBoot(this)) return false
+        if (AppState.inForeground.value) return false
         val now = System.currentTimeMillis()
-        if (now - lastWakeOpenAt < WAKE_DEBOUNCE_MS) return
+        if (now - lastWakeOpenAt < WAKE_DEBOUNCE_MS) return false
         lastWakeOpenAt = now
-        screenOffAt = 0L
         openApp()
         Settings.recordBootTrace(
             this,
-            Settings.WAKE_ACTION,
+            reason,
             if (Settings.canDrawOverlays(this)) Settings.BOOT_STARTED else Settings.BOOT_NO_OVERLAY
         )
+        return true
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -363,9 +398,14 @@ class LocationService : LifecycleService(), LocationListener {
 
     private fun setParked(value: Boolean) {
         if (parked == value) return
+        val wasParked = parked
         parked = value
         getSharedPreferences(STATE_PREF, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_PARKED, value).apply()
+        // Standing still for minutes and then driving off is the car being used again, told by the
+        // one signal that needs nothing from the head unit: the GPS. On a unit that neither boots
+        // nor reports its screen, this is the only thing left that can bring the app back up.
+        if (wasParked && !value) autoOpen(Settings.DRIVE_ACTION)
     }
 
     /** How far off our path a point may sit and still count as "on this road", at distance [d]. */
@@ -564,6 +604,7 @@ class LocationService : LifecycleService(), LocationListener {
     override fun onDestroy() {
         runCatching { locationManager.removeUpdates(this) }
         runCatching { unregisterReceiver(wakeReceiver) }
+        runCatching { displayManager.unregisterDisplayListener(displayListener) }
         hideOverlay()
         super.onDestroy()
     }

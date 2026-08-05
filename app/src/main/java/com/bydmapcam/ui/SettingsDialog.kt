@@ -164,7 +164,7 @@ fun SettingsDialog(
                 HorizontalDivider()
                 SettingRow(
                     title = "เปิดแอปเองตอนสตาร์ทรถ",
-                    subtitle = "เปิดแอปเมื่อจอบูตเสร็จ หรือจอตื่นหลังดับไปเกิน 2 นาที (ต้องอนุญาต \"แสดงทับแอปอื่น\")"
+                    subtitle = "เปิดแอปเมื่อจอบูต จอตื่นหลังดับเกิน 2 นาที หรือรถเริ่มออกตัวหลังจอดนาน (ต้องอนุญาต \"แสดงทับแอปอื่น\")"
                 ) {
                     Switch(
                         checked = autoBoot,
@@ -255,9 +255,20 @@ private val bootTimeFmt = SimpleDateFormat("d MMM HH:mm", Locale.forLanguageTag(
  * unit's own auto-start list can help.
  */
 private fun aliveStatus(context: Context): String {
-    val at = Settings.aliveAt(context)
-    if (at == 0L) return "ยังไม่เคยรายงานตัว — เปิดแอปค้างไว้สักครู่แล้วดูใหม่"
-    return "ทำงานล่าสุด ${bootTimeFmt.format(Date(at))} · ถ้าเวลานี้หยุดตอนดับเครื่องแล้วมาเดินต่อตอนเปิดแอปเอง แปลว่าจอฆ่าแอปตอนดับ"
+    val alive = Settings.aliveAt(context)
+    if (alive == 0L) return "ยังไม่เคยรายงานตัว — เปิดแอปค้างไว้สักครู่แล้วดูใหม่"
+    val started = Settings.processStartAt(context)
+    val screenOff = Settings.screenOffSeenAt(context)
+    return buildString {
+        // The process-start time is the decisive one: if it predates the last power-up we were
+        // running the whole time the car was off, and if it doesn't we were killed and rebuilt.
+        append("เริ่มทำงานเมื่อ ${bootTimeFmt.format(Date(started))}")
+        append(" · รายงานตัวล่าสุด ${bootTimeFmt.format(Date(alive))}")
+        append(
+            if (screenOff == 0L) " · ไม่เคยเห็นจอดับเลย (จอนี้ไม่บอก Android ว่าดับ)"
+            else " · เห็นจอดับล่าสุด ${bootTimeFmt.format(Date(screenOff))}"
+        )
+    }
 }
 
 /**

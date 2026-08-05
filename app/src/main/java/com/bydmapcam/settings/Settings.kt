@@ -16,6 +16,8 @@ object Settings {
     private const val KEY_BOOT_ACTION = "boot_last_action"
     private const val KEY_BOOT_RESULT = "boot_last_result"
     private const val KEY_ALIVE_AT = "service_alive_at"
+    private const val KEY_PROC_START_AT = "process_start_at"
+    private const val KEY_SCREEN_OFF_AT = "screen_off_seen_at"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
@@ -63,6 +65,9 @@ object Settings {
      *  way we learn the car has been switched on. Recorded through the same trace. */
     const val WAKE_ACTION = "จอตื่นจากพัก"
 
+    /** The last resort, and the only trigger that needs nothing from the ROM: the car drives off. */
+    const val DRIVE_ACTION = "รถเริ่มออกตัว"
+
     const val BOOT_OFF = "off"               // broadcast arrived, but the toggle was off
     const val BOOT_STARTED = "started"       // asked for the window while holding the overlay permission
     const val BOOT_NO_OVERLAY = "no_overlay" // asked without it — Android drops the start, silently
@@ -98,6 +103,19 @@ object Settings {
         prefs(context).edit().putLong(KEY_ALIVE_AT, System.currentTimeMillis()).apply()
 
     fun aliveAt(context: Context): Long = prefs(context).getLong(KEY_ALIVE_AT, 0L)
+
+    /** When this process was created. Older than the last power-up = we survived the car being off. */
+    fun recordProcessStart(context: Context) =
+        prefs(context).edit().putLong(KEY_PROC_START_AT, System.currentTimeMillis()).apply()
+
+    fun processStartAt(context: Context): Long = prefs(context).getLong(KEY_PROC_START_AT, 0L)
+
+    /** Last time Android told us the screen went dark. Never, on a unit that only cuts the panel's
+     *  backlight while the system keeps running — which is exactly the case with no signal to wait for. */
+    fun recordScreenOff(context: Context) =
+        prefs(context).edit().putLong(KEY_SCREEN_OFF_AT, System.currentTimeMillis()).apply()
+
+    fun screenOffSeenAt(context: Context): Long = prefs(context).getLong(KEY_SCREEN_OFF_AT, 0L)
 
     fun meIcon(context: Context): MeIcon {
         val name = prefs(context).getString(KEY_ME_ICON, null) ?: return MeIcon.ARROW
