@@ -243,7 +243,9 @@ private fun appVersion(context: Context): String = runCatching {
     } else {
         @Suppress("DEPRECATION") info.versionCode.toLong()
     }
-    "RadarPin ${info.versionName} (build $code)"
+    // The Android version is here because it decides which of the background rules apply at all:
+    // the restrictions that broke auto-start arrived in 14, and a head unit may be years older.
+    "RadarPin ${info.versionName} (build $code) · Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})"
 }.getOrDefault("RadarPin")
 
 private val bootTimeFmt = SimpleDateFormat("d MMM HH:mm", Locale.forLanguageTag("th-TH"))

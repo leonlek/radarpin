@@ -68,6 +68,9 @@ object Settings {
     /** The last resort, and the only trigger that needs nothing from the ROM: the car drives off. */
     const val DRIVE_ACTION = "รถเริ่มออกตัว"
 
+    /** The keep-alive alarm found the app dead while the car was clearly in use. */
+    const val REVIVE_ACTION = "ปลุกตัวเองหลังถูกปิด"
+
     const val BOOT_OFF = "off"               // broadcast arrived, but the toggle was off
     const val BOOT_STARTED = "started"       // asked for the window while holding the overlay permission
     const val BOOT_NO_OVERLAY = "no_overlay" // asked without it — Android drops the start, silently
