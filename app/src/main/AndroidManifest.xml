@@ -48,12 +48,6 @@
             </intent-filter>
         </service>
 
-        <!-- Puts the service back after the head unit kills it; the alarm outlives our process. -->
-        <receiver
-            android:name=".boot.KeepAliveReceiver"
-            android:enabled="true"
-            android:exported="false" />
-
         <!-- Opens the app on head-unit power-up, only when the setting is on (default off). -->
         <receiver
             android:name=".boot.BootReceiver"

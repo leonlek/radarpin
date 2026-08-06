@@ -37,7 +37,6 @@ import com.bydmapcam.R
 import com.bydmapcam.alert.AlertFormat
 import com.bydmapcam.alert.Beeper
 import com.bydmapcam.alert.Speaker
-import com.bydmapcam.boot.KeepAliveReceiver
 import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.data.PointRepository
 import com.bydmapcam.data.PointType
@@ -119,7 +118,6 @@ class LocationService : LifecycleService(), LocationListener {
 
     override fun onCreate() {
         super.onCreate()
-        isRunning = true
         repository = PointRepository(this)
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         // Start out parked if that's how we were left: otherwise re-opening the app while parked
@@ -147,10 +145,6 @@ class LocationService : LifecycleService(), LocationListener {
         )
         displayManager = getSystemService(DisplayManager::class.java)
         runCatching { displayManager.registerDisplayListener(displayListener, null) }
-
-        // Our own resurrection, in case the head unit kills us while the car is parked: the alarm
-        // is the system's, not ours, so it survives what we don't.
-        KeepAliveReceiver.schedule(this)
 
         // A heartbeat the settings screen reads back. Whether this survives the car being off is
         // the whole question behind "auto-start does nothing" on a head unit.
@@ -608,7 +602,6 @@ class LocationService : LifecycleService(), LocationListener {
     override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
 
     override fun onDestroy() {
-        isRunning = false
         runCatching { locationManager.removeUpdates(this) }
         runCatching { unregisterReceiver(wakeReceiver) }
         runCatching { displayManager.unregisterDisplayListener(displayListener) }
@@ -639,12 +632,6 @@ class LocationService : LifecycleService(), LocationListener {
     }
 
     companion object {
-        /** Whether this process currently has the service up. Read from a freshly created process
-         *  it is false, which is exactly how the keep-alive alarm knows it is a resurrection. */
-        @Volatile
-        var isRunning = false
-            private set
-
         private const val NOTIF_ID = 1001
         private const val CHANNEL_ID = "location"
         /** How close an INFO point gets before its icon+name pops up (then closes past it). */
