@@ -86,11 +86,17 @@ private const val SRC_PARKING_LABEL = "src-parking-label"
 private const val SRC_DRAFT = "src-draft"
 private const val SRC_DRAFT_PTS = "src-draft-pts"
 
-/** How far off the middle of the road each kerb is drawn — a real distance, so it straddles it. */
-private const val KERB_OFFSET_M = 5.0
+/**
+ * How far off the middle of the road each kerb is drawn — a real distance, so it straddles the road
+ * at every zoom. Nine metres rather than a kerb's honest four or five: the point of the pair is to
+ * frame the road, and a line that lands on the tarmac of a four-lane street reads as "this road",
+ * not "this side of it". On a narrow soi it sits a little past the kerb instead, which costs
+ * nothing — there is no other road there to confuse it with.
+ */
+private const val KERB_OFFSET_M = 9.0
 
 /** The label sits this much beyond its kerb, clear of the line it belongs to and of its opposite. */
-private const val LABEL_OFFSET_M = 12.0
+private const val LABEL_OFFSET_M = 16.0
 
 /** Below this the kerbs are hair-thin clutter over a whole district; a parked car is never here. */
 private const val PARKING_MIN_ZOOM = 14f
@@ -708,8 +714,8 @@ private fun kerbSeparation(side: Side): Expression {
     val sign = if (side == Side.LEFT) -1f else 1f
     return Expression.interpolate(
         Expression.linear(), Expression.zoom(),
-        Expression.stop(PARKING_MIN_ZOOM, 4f * sign),
-        Expression.stop(17f, 0f)
+        Expression.stop(PARKING_MIN_ZOOM, 5f * sign),
+        Expression.stop(17f, 2f * sign)
     )
 }
 

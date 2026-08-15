@@ -13,7 +13,7 @@ android {
         applicationId = "com.bydmapcam"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 22
+        versionCode = 23
         versionName = "0.1.0"
 
         // Ship only ARM (the car + phones); drop x86/x86_64 (emulator-only) to halve APK size.
