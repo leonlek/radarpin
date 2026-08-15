@@ -11,6 +11,8 @@ object Settings {
     private const val KEY_HEADING_UP = "heading_up"
     private const val KEY_DIRECTION_AWARE = "direction_aware"
     private const val KEY_AUTO_BOOT = "auto_start_boot"
+    private const val KEY_UPDATE_CHECK = "update_check"
+    private const val KEY_UPDATE_AT = "update_checked_at"
     private const val KEY_PARKING_LINES = "parking_lines"
     private const val KEY_PARKING_REMIND = "parking_reminder"
     private const val KEY_ME_ICON = "me_icon"
@@ -61,6 +63,18 @@ object Settings {
 
     fun setParkingReminder(context: Context, value: Boolean) =
         prefs(context).edit().putBoolean(KEY_PARKING_REMIND, value).apply()
+
+    /** Look for a newer build when the app opens (once a day at most). */
+    fun updateCheck(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_UPDATE_CHECK, true) // default ON
+
+    fun setUpdateCheck(context: Context, value: Boolean) =
+        prefs(context).edit().putBoolean(KEY_UPDATE_CHECK, value).apply()
+
+    fun updateCheckedAt(context: Context): Long = prefs(context).getLong(KEY_UPDATE_AT, 0L)
+
+    fun recordUpdateCheck(context: Context) =
+        prefs(context).edit().putLong(KEY_UPDATE_AT, System.currentTimeMillis()).apply()
 
     /** Open the app by itself when the head unit boots. */
     fun autoStartOnBoot(context: Context): Boolean =

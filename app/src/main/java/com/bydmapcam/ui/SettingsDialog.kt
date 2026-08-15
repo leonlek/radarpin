@@ -37,6 +37,7 @@ import com.bydmapcam.media.MediaLink
 import com.bydmapcam.parking.ParkingRules
 import com.bydmapcam.settings.MeIcon
 import com.bydmapcam.settings.Settings
+import com.bydmapcam.update.Updates
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -52,6 +53,7 @@ fun SettingsDialog(
     onImportCameras: () -> Unit,
     onOpenOffline: () -> Unit,
     onOpenTripHistory: () -> Unit,
+    onCheckUpdate: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -60,6 +62,7 @@ fun SettingsDialog(
     var directionAware by remember { mutableStateOf(Settings.directionAware(context)) }
     var autoBoot by remember { mutableStateOf(Settings.autoStartOnBoot(context)) }
     var parkingReminder by remember { mutableStateOf(Settings.parkingReminder(context)) }
+    var updateCheck by remember { mutableStateOf(Settings.updateCheck(context)) }
     val mediaAccess = MediaLink.hasAccess(context)
 
     AlertDialog(
@@ -246,6 +249,24 @@ fun SettingsDialog(
                     subtitle = "เก็บพื้นที่ที่เห็นบนจอไว้ใช้ตอนไม่มีเน็ต"
                 ) {
                     TextButton(onClick = onOpenOffline) { Text("จัดการ") }
+                }
+                SettingRow(
+                    title = "ตรวจอัปเดตอัตโนมัติ",
+                    subtitle = "เช็ควันละครั้งตอนเปิดแอป — ไม่ยิงเน็ตระหว่างขับ"
+                ) {
+                    Switch(
+                        checked = updateCheck,
+                        onCheckedChange = {
+                            updateCheck = it
+                            Settings.setUpdateCheck(context, it)
+                        }
+                    )
+                }
+                SettingRow(
+                    title = "ตรวจอัปเดตตอนนี้",
+                    subtitle = "ดูว่ามีเวอร์ชันใหม่กว่า build ${Updates.installedVersion(context)} ไหม"
+                ) {
+                    TextButton(onClick = onCheckUpdate) { Text("ตรวจ") }
                 }
                 SettingRow(
                     title = "ประวัติทริป",

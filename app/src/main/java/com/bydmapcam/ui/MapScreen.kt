@@ -31,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
@@ -76,7 +77,9 @@ import com.bydmapcam.media.MediaLink
 import com.bydmapcam.radio.RadioPlayer
 import com.bydmapcam.settings.Settings
 import com.bydmapcam.trip.TripTracker
+import com.bydmapcam.update.Updates
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** Below this width the alert has to stay a full-width bar; above it, it becomes a side panel. */
 private const val RAIL_MIN_WIDTH_DP = 600
@@ -170,6 +173,12 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             MediaLink.start(context) // picks up the moment access is granted
         }
     }
+
+    // A sideloaded app has to tell you about its own new versions. Once when the app opens, never
+    // while driving: the check is a single small file and then it is quiet for a day.
+    val scope = rememberCoroutineScope()
+    val updateState by Updates.state.collectAsState()
+    LaunchedEffect(Unit) { Updates.check(context) }
 
     val activeTrip by TripTracker.active.collectAsState()
     val restoredTrip by TripTracker.restored.collectAsState()
@@ -302,6 +311,14 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                     )
                 }
             }
+
+            UpdateCard(
+                state = updateState,
+                onUpdate = { available -> scope.launch { Updates.download(context, available) } },
+                onDismiss = { Updates.dismiss() },
+                onOpenPage = { Updates.openDownloadPage(context) },
+                modifier = Modifier.padding(horizontal = 12.dp)
+            )
 
             // Parked on a mapped block, with something to act on. Shown here rather than over the
             // map's bottom half because the driver is stopped and reading, not glancing.
@@ -681,6 +698,18 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             parkingLines = parkingLines,
             onParkingLinesChange = { parkingLines = it; Settings.setParkingLines(context, it) },
             onOpenTripHistory = { showSettings = false; showTripHistory = true },
+            onCheckUpdate = {
+                showSettings = false
+                Toast.makeText(context, "กำลังตรวจอัปเดต…", Toast.LENGTH_SHORT).show()
+                scope.launch {
+                    val message = when (Updates.check(context, force = true)) {
+                        Updates.Result.FOUND -> null // the card says it better than a toast can
+                        Updates.Result.UP_TO_DATE -> "ใช้เวอร์ชันล่าสุดอยู่แล้ว"
+                        else -> "ตรวจอัปเดตไม่สำเร็จ — เช็คเน็ตแล้วลองใหม่"
+                    }
+                    message?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+                }
+            },
             onImportCameras = {
                 Toast.makeText(context, "กำลังนำเข้าฐานกล้อง…", Toast.LENGTH_SHORT).show()
                 vm.importCameras { count ->
