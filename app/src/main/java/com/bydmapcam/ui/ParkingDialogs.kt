@@ -228,9 +228,12 @@ fun ParkingInfoCard(
 ) {
     val states = Side.entries.associateWith { ParkingRules.stateOf(block, it, at) }
     val allowed = states.entries.filter { it.value == ParkingState.ALLOWED }
+    // The date is spelled out here too: the map shows it on the green kerb, and this is where a
+    // driver checks that the app and the sign they just read agree.
+    val today = ParkingRules.dayOfMonth(at)
     val headline = when {
-        allowed.isEmpty() -> "วันนี้จอดไม่ได้ทั้งสองฝั่ง"
-        else -> "วันนี้จอดได้ฝั่งเส้นเขียว"
+        allowed.isEmpty() -> "วันที่ $today — วันนี้จอดไม่ได้ทั้งสองฝั่ง"
+        else -> "วันที่ $today — จอดได้ฝั่งเส้นเขียว"
     }
     val flipping = Side.entries.any { ParkingRules.flipsOvernight(block, it, at) }
 
@@ -263,8 +266,11 @@ fun ParkingInfoCard(
                         shape = CircleShape,
                         modifier = Modifier.size(12.dp)
                     ) {}
+                    // "ห้ามจอดตลอด — ห้ามจอดตลอด" says it twice; the rule and today's verdict are
+                    // only worth both printing when they differ.
+                    val rule = block.ruleOf(side).label
                     Text(
-                        text = "  ${block.ruleOf(side).label} — ${state.label}",
+                        text = if (rule == state.label) "  $rule" else "  $rule — ${state.label}",
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }

@@ -56,6 +56,9 @@ object ParkingRules {
      */
     fun isOddDay(at: Long): Boolean = calendar(at).get(Calendar.DAY_OF_MONTH) % 2 == 1
 
+    /** The number on the sign: what "odd" and "even" are actually about. */
+    fun dayOfMonth(at: Long): Int = calendar(at).get(Calendar.DAY_OF_MONTH)
+
     /** Changes exactly when the calendar day does — a cheap key for "redraw, it's tomorrow now". */
     fun dayKey(at: Long): Int = with(calendar(at)) {
         get(Calendar.YEAR) * 10_000 + get(Calendar.MONTH) * 100 + get(Calendar.DAY_OF_MONTH)
@@ -152,6 +155,69 @@ object ParkingRules {
             }
         }
         return best
+    }
+
+    /**
+     * The traced centre line pushed [metres] sideways onto one kerb.
+     *
+     * Done in metres here rather than with MapLibre's pixel `line-offset` because a kerb is a
+     * real distance from the middle of the road, not a screen distance: a fixed pixel offset sits
+     * neatly beside the road at one zoom and buried under it at the next, since the basemap draws
+     * roads wider as you zoom in. Offsetting the geometry keeps the two kerbs straddling the road
+     * at every zoom, which is also what makes them readable — the road stays visible between them.
+     *
+     * Corners use the average of the two adjoining normals, which is a hair short of a true miter
+     * on a sharp bend and invisible on the gentle ones a city block actually has.
+     */
+    fun offsetPath(path: List<GeoPoint>, side: Side, metres: Double): List<GeoPoint> {
+        if (path.size < 2) return path
+        val sign = if (side == Side.LEFT) 1.0 else -1.0
+        // Left of travel in a local metre frame (x east, y north) is (-dy, dx) normalised.
+        val normals = ArrayList<Pair<Double, Double>>(path.size - 1)
+        for (i in 0 until path.size - 1) {
+            val cosLat = cos(Math.toRadians(path[i].lat))
+            val dx = (path[i + 1].lng - path[i].lng) * M_PER_DEG_LNG * cosLat
+            val dy = (path[i + 1].lat - path[i].lat) * M_PER_DEG_LAT
+            val len = sqrt(dx * dx + dy * dy)
+            normals.add(if (len == 0.0) 0.0 to 0.0 else (-dy / len) to (dx / len))
+        }
+        return path.mapIndexed { i, p ->
+            val a = normals[(i - 1).coerceAtLeast(0)]
+            val b = normals[i.coerceAtMost(normals.size - 1)]
+            var nx = a.first + b.first
+            var ny = a.second + b.second
+            val len = sqrt(nx * nx + ny * ny)
+            if (len == 0.0) return@mapIndexed p
+            nx /= len
+            ny /= len
+            val cosLat = cos(Math.toRadians(p.lat))
+            GeoPoint(
+                lat = p.lat + sign * ny * metres / M_PER_DEG_LAT,
+                lng = p.lng + sign * nx * metres / (M_PER_DEG_LNG * cosLat)
+            )
+        }
+    }
+
+    /** The point half way along a path, by distance — where a label for the whole block belongs. */
+    fun midpoint(path: List<GeoPoint>): GeoPoint? {
+        if (path.isEmpty()) return null
+        if (path.size == 1) return path[0]
+        val half = pathLengthM(path) / 2.0
+        var walked = 0.0
+        for (i in 0 until path.size - 1) {
+            val seg = GeoUtils.distanceMeters(
+                path[i].lat, path[i].lng, path[i + 1].lat, path[i + 1].lng
+            )
+            if (walked + seg >= half) {
+                val t = if (seg == 0.0) 0.0 else (half - walked) / seg
+                return GeoPoint(
+                    lat = path[i].lat + (path[i + 1].lat - path[i].lat) * t,
+                    lng = path[i].lng + (path[i + 1].lng - path[i].lng) * t
+                )
+            }
+            walked += seg
+        }
+        return path.last()
     }
 
     /** Length of a traced path in metres — a line with no length has no sides to pick. */

@@ -3,6 +3,7 @@ package com.bydmapcam.ui
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.RectF
 import android.location.Location
 import androidx.compose.animation.core.Animatable
@@ -42,6 +43,7 @@ import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.data.ParkingBlock
 import com.bydmapcam.data.PointType
 import com.bydmapcam.data.Side
+import com.bydmapcam.data.SideRule
 import com.bydmapcam.location.AppState
 import com.bydmapcam.parking.ParkingRules
 import com.bydmapcam.parking.ParkingState
@@ -80,14 +82,28 @@ private const val SRC_INFO = "src-info"
 private const val SRC_PING = "src-ping"
 private const val SRC_ME = "src-me"
 private const val SRC_PARKING = "src-parking"
+private const val SRC_PARKING_LABEL = "src-parking-label"
 private const val SRC_DRAFT = "src-draft"
 private const val SRC_DRAFT_PTS = "src-draft-pts"
 
-/** How far off the centre line each kerb is drawn, in screen pixels at any zoom. */
-private const val KERB_OFFSET_PX = 7f
+/** How far off the middle of the road each kerb is drawn — a real distance, so it straddles it. */
+private const val KERB_OFFSET_M = 5.0
+
+/** The label sits this much beyond its kerb, clear of the line it belongs to and of its opposite. */
+private const val LABEL_OFFSET_M = 12.0
 
 /** Below this the kerbs are hair-thin clutter over a whole district; a parked car is never here. */
 private const val PARKING_MIN_ZOOM = 14f
+
+/**
+ * The green badge is the answer, so it comes in first; the other kerb's day-word waits until the
+ * two labels are far enough apart on screen to both be read. They are twelve metres either side of
+ * the road, which is a hair under one badge-height at this zoom and a comfortable gap by the next.
+ */
+private const val PARKING_BADGE_MIN_ZOOM = 15f
+private const val PARKING_LABEL_MIN_ZOOM = 16.5f
+
+private const val BADGE_IMAGE = "parking_badge"
 
 // Follow-camera glide duration ≈ the GPS update interval, so the map moves continuously
 // between fixes instead of hopping. Linear easing (see easeCamera(..., false)).
@@ -573,42 +589,73 @@ private fun setupLayers(style: Style) {
 }
 
 /**
- * Two lines per block, one per kerb, drawn by offsetting the same centre line to either side. The
- * offset is MapLibre's own (`lineOffset`, positive = right of the drawn direction), so the kerbs
- * stay the same width apart at every zoom and nothing has to be re-projected as the map moves.
+ * One line per kerb, drawn on geometry already pushed sideways in metres (see
+ * [ParkingRules.offsetPath]), so the pair straddles the road instead of lying on it.
+ *
+ * A small pixel offset is added on top, fading out by the zoom where the metres are wide enough to
+ * see: zoomed out to a whole district five metres is half a pixel, and two lines that land on the
+ * same pixel read as one line of the wrong colour.
  */
 private fun setupParkingLayers(style: Style) {
     style.addSource(GeoJsonSource(SRC_PARKING))
-    listOf(
-        "lyr-parking-left" to -KERB_OFFSET_PX,
-        "lyr-parking-right" to KERB_OFFSET_PX
-    ).forEach { (id, offset) ->
-        val side = if (offset < 0) Side.LEFT else Side.RIGHT
+    Side.entries.forEach { side ->
+        val id = if (side == Side.LEFT) "lyr-parking-left" else "lyr-parking-right"
         style.addLayer(
             LineLayer(id, SRC_PARKING).withProperties(
                 PropertyFactory.lineColor(parkingColorByState()),
                 PropertyFactory.lineWidth(5f),
-                PropertyFactory.lineOffset(offset),
+                PropertyFactory.lineOffset(kerbSeparation(side)),
                 PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                 PropertyFactory.lineOpacity(0.9f)
             ).withFilter(Expression.eq(Expression.get("side"), Expression.literal(side.name)))
                 .also { it.minZoom = PARKING_MIN_ZOOM }
         )
     }
+    // Today's date, in a green badge, beside the kerb you may park on — and nothing but the
+    // day-word beside the other one. A driver looking for a space needs one answer, not a
+    // comparison: the badge is the answer, and its date is why, in the same units as the sign on
+    // the pole. Both sit on their own source, a little further out than the kerbs themselves,
+    // because two labels on lines ten metres apart land on top of each other and neither can be
+    // read — and they stay horizontal rather than following the road, which a moving eye prefers.
+    style.addSource(GeoJsonSource(SRC_PARKING_LABEL))
+    style.addLayer(
+        SymbolLayer("lyr-parking-badge", SRC_PARKING_LABEL).withProperties(
+            PropertyFactory.textField(Expression.get("label")),
+            PropertyFactory.textFont(arrayOf("Noto Sans Regular")),
+            PropertyFactory.textSize(13f),
+            PropertyFactory.textColor(android.graphics.Color.WHITE),
+            PropertyFactory.iconImage(BADGE_IMAGE),
+            // The badge grows to whatever the text needs, so "15 · คี่" and "ทุกวัน" both fit.
+            PropertyFactory.iconTextFit(Property.ICON_TEXT_FIT_BOTH),
+            PropertyFactory.iconTextFitPadding(arrayOf(3f, 7f, 3f, 7f)),
+            PropertyFactory.iconAllowOverlap(true),
+            PropertyFactory.textAllowOverlap(true)
+        ).withFilter(allowedFilter(true))
+            .also { it.minZoom = PARKING_BADGE_MIN_ZOOM }
+    )
+    style.addLayer(
+        SymbolLayer("lyr-parking-label", SRC_PARKING_LABEL).withProperties(
+            PropertyFactory.textField(Expression.get("label")),
+            PropertyFactory.textFont(arrayOf("Noto Sans Regular")),
+            PropertyFactory.textSize(11f),
+            PropertyFactory.textColor(parkingColorByState()),
+            PropertyFactory.textHaloColor(android.graphics.Color.WHITE),
+            PropertyFactory.textHaloWidth(2f),
+            PropertyFactory.textAllowOverlap(true)
+        ).withFilter(allowedFilter(false))
+            .also { it.minZoom = PARKING_LABEL_MIN_ZOOM }
+    )
 
     // The block being drawn: the traced centre line, its vertices, and — at the side-picking step —
     // both kerbs in grey with the chosen one already green, so the tap has something to answer.
     style.addSource(GeoJsonSource(SRC_DRAFT))
-    listOf(
-        "lyr-draft-left" to -KERB_OFFSET_PX,
-        "lyr-draft-right" to KERB_OFFSET_PX
-    ).forEach { (id, offset) ->
-        val side = if (offset < 0) Side.LEFT else Side.RIGHT
+    Side.entries.forEach { side ->
+        val id = if (side == Side.LEFT) "lyr-draft-left" else "lyr-draft-right"
         style.addLayer(
             LineLayer(id, SRC_DRAFT).withProperties(
                 PropertyFactory.lineColor(Expression.get("color")),
                 PropertyFactory.lineWidth(6f),
-                PropertyFactory.lineOffset(offset),
+                PropertyFactory.lineOffset(kerbSeparation(side)),
                 PropertyFactory.lineCap(Property.LINE_CAP_ROUND)
             ).withFilter(Expression.eq(Expression.get("side"), Expression.literal(side.name)))
         )
@@ -631,6 +678,41 @@ private fun setupParkingLayers(style: Style) {
     )
 }
 
+/** Splits the two kerb symbol layers: the one you can park on today, and the one you can't. */
+private fun allowedFilter(allowed: Boolean): Expression {
+    val isAllowed = Expression.eq(
+        Expression.get("state"),
+        Expression.literal(ParkingState.ALLOWED.name)
+    )
+    return if (allowed) isAllowed else Expression.not(isAllowed)
+}
+
+/** The green pill the date sits in. Stretched to the text by `icon-text-fit`, so one will do. */
+private fun badgeBitmap(): Bitmap {
+    val w = 120
+    val h = 56
+    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = ParkingState.ALLOWED.color.toInt()
+    }
+    canvas.drawRoundRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), h / 2f, h / 2f, paint)
+    return bitmap
+}
+
+/**
+ * The screen-space nudge that keeps the two kerbs apart while their real five metres are still
+ * sub-pixel, gone by the zoom where the geometry speaks for itself.
+ */
+private fun kerbSeparation(side: Side): Expression {
+    val sign = if (side == Side.LEFT) -1f else 1f
+    return Expression.interpolate(
+        Expression.linear(), Expression.zoom(),
+        Expression.stop(PARKING_MIN_ZOOM, 4f * sign),
+        Expression.stop(17f, 0f)
+    )
+}
+
 /** Colour straight off the state, so the map, the info card and the warning can never disagree. */
 private fun parkingColorByState(): Expression = Expression.match(
     Expression.get("state"),
@@ -645,20 +727,47 @@ private fun parkingColorByState(): Expression = Expression.match(
 
 private fun updateParkingSource(style: Style, blocks: List<ParkingBlock>, at: Long) {
     val feats = ArrayList<Feature>(blocks.size * 2)
+    val labels = ArrayList<Feature>(blocks.size * 2)
     for (b in blocks) {
         if (b.path.size < 2) continue
-        val line = LineString.fromLngLats(b.path.map { Point.fromLngLat(it.lng, it.lat) })
         for (side in Side.entries) {
+            val kerb = ParkingRules.offsetPath(b.path, side, KERB_OFFSET_M)
+            val state = ParkingRules.stateOf(b, side, at)
             feats.add(
-                Feature.fromGeometry(line).apply {
+                Feature.fromGeometry(
+                    LineString.fromLngLats(kerb.map { Point.fromLngLat(it.lng, it.lat) })
+                ).apply {
                     addNumberProperty("id", b.id)
                     addStringProperty("side", side.name)
-                    addStringProperty("state", ParkingRules.stateOf(b, side, at).name)
+                    addStringProperty("state", state.name)
+                }
+            )
+            val anchor = ParkingRules.midpoint(
+                ParkingRules.offsetPath(b.path, side, LABEL_OFFSET_M)
+            ) ?: continue
+            labels.add(
+                Feature.fromGeometry(Point.fromLngLat(anchor.lng, anchor.lat)).apply {
+                    addStringProperty("state", state.name)
+                    addStringProperty("label", kerbLabel(b.ruleOf(side), state, at))
                 }
             )
         }
     }
     style.getSourceAs<GeoJsonSource>(SRC_PARKING)?.setGeoJson(FeatureCollection.fromFeatures(feats))
+    style.getSourceAs<GeoJsonSource>(SRC_PARKING_LABEL)
+        ?.setGeoJson(FeatureCollection.fromFeatures(labels))
+}
+
+/**
+ * What a kerb says on the map. The one you can park on carries today's date — the same number the
+ * sign on the pole is about, so there's no odd/even arithmetic to do at 30 km/h — and the others
+ * carry only the word, which is enough to see that they are somebody else's day.
+ */
+private fun kerbLabel(rule: SideRule, state: ParkingState, at: Long): String = when {
+    state != ParkingState.ALLOWED -> rule.shortLabel
+    // A kerb with no alternation has no date to give; the word already says everything.
+    rule == SideRule.ALWAYS -> rule.shortLabel
+    else -> "${ParkingRules.dayOfMonth(at)} · ${rule.shortLabel}"
 }
 
 private fun updateDraftSources(style: Style, draft: ParkingDraft?) {
@@ -671,8 +780,11 @@ private fun updateDraftSources(style: Style, draft: ParkingDraft?) {
         )
         if (draft?.stage == ParkingDraft.Stage.SIDE) {
             for (side in Side.entries) {
+                val kerb = ParkingRules.offsetPath(path, side, KERB_OFFSET_M)
                 feats.add(
-                    Feature.fromGeometry(line).apply {
+                    Feature.fromGeometry(
+                        LineString.fromLngLats(kerb.map { Point.fromLngLat(it.lng, it.lat) })
+                    ).apply {
                         addStringProperty("side", side.name)
                         // Both kerbs the same neutral colour: the question is which one, and a
                         // colour difference before the answer would look like the answer.
@@ -702,6 +814,7 @@ private fun drawableToBitmap(context: Context, resId: Int): Bitmap {
 }
 
 private fun addMarkerImages(style: Style, context: Context) {
+    style.addImage(BADGE_IMAGE, badgeBitmap())
     style.addImage("m_camera", drawableToBitmap(context, R.drawable.ic_marker_camera))
     style.addImage("m_poi", drawableToBitmap(context, R.drawable.ic_marker_poi))
     style.addImage("m_ev", drawableToBitmap(context, R.drawable.ic_marker_ev))
