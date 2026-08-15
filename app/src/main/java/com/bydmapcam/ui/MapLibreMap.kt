@@ -784,7 +784,11 @@ private fun updateDraftSources(style: Style, draft: ParkingDraft?) {
         feats.add(
             Feature.fromGeometry(line).apply { addStringProperty("side", "CENTER") }
         )
-        if (draft?.stage == ParkingDraft.Stage.SIDE) {
+        // Drawn from the first two taps onward, not just at the side-picking step: the kerbs are
+        // what the driver is really placing, and seeing them follow the tarmac (or fail to, on a
+        // bend traced with too few points) while there is still a finger on the map is the whole
+        // difference between fixing it now and discovering it afterwards.
+        run {
             for (side in Side.entries) {
                 val kerb = ParkingRules.offsetPath(path, side, KERB_OFFSET_M)
                 feats.add(

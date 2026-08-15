@@ -42,6 +42,9 @@ object ParkingRules {
     private const val M_PER_DEG_LAT = 110_540.0
     private const val M_PER_DEG_LNG = 111_320.0
 
+    /** How far a mitered corner may reach, as a multiple of the offset, before it is cut short. */
+    private const val MAX_MITER = 4.0
+
     /** How close to the centre line a car has to be to count as parked on this block. */
     const val ON_BLOCK_M = 25.0
 
@@ -166,8 +169,12 @@ object ParkingRules {
      * roads wider as you zoom in. Offsetting the geometry keeps the two kerbs straddling the road
      * at every zoom, which is also what makes them readable — the road stays visible between them.
      *
-     * Corners use the average of the two adjoining normals, which is a hair short of a true miter
-     * on a sharp bend and invisible on the gentle ones a city block actually has.
+     * Corners are mitered properly: the averaged normal of the two adjoining segments is *shorter*
+     * than the offset by the cosine of half the turn, so simply scaling it pinches the kerb inward
+     * at every bend — by a third at a right angle — and on the outside of a curve that pinch puts
+     * the line back on the road, which is exactly what a curved block looked like. Dividing by that
+     * cosine restores the distance; the clamp stops a hairpin from throwing a spike into the next
+     * district, where a bevel would be the right answer and nobody traces a block anyway.
      */
     fun offsetPath(path: List<GeoPoint>, side: Side, metres: Double): List<GeoPoint> {
         if (path.size < 2) return path
@@ -190,10 +197,13 @@ object ParkingRules {
             if (len == 0.0) return@mapIndexed p
             nx /= len
             ny /= len
+            // cos of half the turn: the miter direction against either segment's own normal.
+            val cosHalf = nx * a.first + ny * a.second
+            val reach = metres * (if (cosHalf < 1.0 / MAX_MITER) MAX_MITER else 1.0 / cosHalf)
             val cosLat = cos(Math.toRadians(p.lat))
             GeoPoint(
-                lat = p.lat + sign * ny * metres / M_PER_DEG_LAT,
-                lng = p.lng + sign * nx * metres / (M_PER_DEG_LNG * cosLat)
+                lat = p.lat + sign * ny * reach / M_PER_DEG_LAT,
+                lng = p.lng + sign * nx * reach / (M_PER_DEG_LNG * cosLat)
             )
         }
     }
