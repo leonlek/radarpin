@@ -97,6 +97,9 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             } else {
                 parkingRepo.update(
                     existing.copy(
+                        // Carries the re-traced line when the draw step was re-entered, and the
+                        // block's own unchanged one when only the rules were edited.
+                        path = pending.path,
                         name = form.name,
                         leftRule = form.leftRule,
                         rightRule = form.rightRule,

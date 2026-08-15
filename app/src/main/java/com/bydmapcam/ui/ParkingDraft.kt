@@ -15,7 +15,13 @@ import com.bydmapcam.parking.ParkingRules
  */
 data class ParkingDraft(
     val path: List<GeoPoint> = emptyList(),
-    val stage: Stage = Stage.PATH
+    val stage: Stage = Stage.PATH,
+    /**
+     * The block being re-traced, if this draft is a correction rather than a new block. Its rules
+     * ride along untouched — a line drawn slightly off the road is the common mistake, and having
+     * to delete the block and re-enter which kerb is odd is a punishment for a wobbly finger.
+     */
+    val editing: ParkingBlock? = null
 ) {
     enum class Stage {
         /** Tapping out the centre line of the block. */

@@ -77,6 +77,8 @@ fun ParkingBlockDialog(
     initialRight: SideRule,
     initialBanFrom: Int?,
     initialBanTo: Int?,
+    /** Non-null for a saved block: leaves this form and re-opens the map to trace the line again. */
+    onRedraw: (() -> Unit)? = null,
     onDismiss: () -> Unit,
     onSave: (ParkingFormResult) -> Unit
 ) {
@@ -203,6 +205,19 @@ fun ParkingBlockDialog(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error
                         )
+                    }
+                }
+                onRedraw?.let { redraw ->
+                    HorizontalDivider()
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("เส้นไม่ตรงแนวถนน")
+                            Text(
+                                "ลากใหม่ได้ กฎที่ตั้งไว้ไม่หาย",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        TextButton(onClick = redraw) { Text("วาดเส้นใหม่") }
                     }
                 }
             }
@@ -513,18 +528,28 @@ fun ParkingDrawBar(
         shadowElevation = 6.dp
     ) {
         Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 6.dp)) {
+            val editing = draft.editing
             Text(
                 text = when (draft.stage) {
-                    ParkingDraft.Stage.PATH -> "แตะตามแนวถนน · จากหัวบล็อกถึงท้ายบล็อก"
+                    ParkingDraft.Stage.PATH ->
+                        if (editing == null) "แตะตามแนวถนน · จากหัวบล็อกถึงท้ายบล็อก"
+                        else "ลากเส้นใหม่ให้ตรงแนวถนน"
                     ParkingDraft.Stage.SIDE -> "แตะฝั่งที่จอดได้วันคี่"
                 },
                 style = MaterialTheme.typography.titleMedium
             )
             Text(
                 text = when (draft.stage) {
-                    ParkingDraft.Stage.PATH ->
-                        if (draft.path.isEmpty()) "ถนนตรงแตะแค่ 2 จุดก็พอ ถนนโค้งแตะเพิ่มได้"
-                        else "${draft.path.size} จุด"
+                    ParkingDraft.Stage.PATH -> buildString {
+                        if (editing != null) append("${editing.name} · ")
+                        if (draft.path.isEmpty()) {
+                            append("ถนนตรงแตะแค่ 2 จุดก็พอ ถนนโค้งแตะเพิ่มได้")
+                        } else {
+                            append("${draft.path.size} จุด")
+                            // The old line is still loaded, so say which button empties it.
+                            if (editing != null) append(" (กด \"ถอย\" ลบจุดเดิมทีละจุด)")
+                        }
+                    }
                     ParkingDraft.Stage.SIDE -> "แตะข้างเส้นฝั่งที่ต้องการ — อีกฝั่งจะเป็นวันคู่เอง"
                 },
                 style = MaterialTheme.typography.bodySmall

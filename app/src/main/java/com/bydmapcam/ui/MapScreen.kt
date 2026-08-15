@@ -206,7 +206,13 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             focus = focus,
             headingUp = headingUp,
             meIcon = meIcon,
-            parkingBlocks = if (parkingLines) parkingBlocks else emptyList(),
+            // The block being re-traced drops out of the painted set: its old kerbs under the new
+            // draft would be two answers to the same question.
+            parkingBlocks = if (parkingLines) {
+                parkingBlocks.filter { it.id != draft?.editing?.id }
+            } else {
+                emptyList()
+            },
             parkingAt = parkingAt,
             draft = draft,
             onMapTap = { lat, lng ->
@@ -222,7 +228,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                         // answer, so it works whether they hit the drawn kerb or the road beside it.
                         ParkingDraft.Stage.SIDE ->
                             ParkingRules.nearestOnPath(d.path, lat, lng)?.side?.let { side ->
-                                pendingBlock = PendingBlock(d.path, side)
+                                pendingBlock = PendingBlock(d.path, side, d.editing)
                             }
                     }
                     true
@@ -526,6 +532,15 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 ?: if (pending.oddSide == Side.LEFT) SideRule.EVEN_DAYS else SideRule.ODD_DAYS,
             initialBanFrom = existing?.banFromMin,
             initialBanTo = existing?.banToMin,
+            // Offered only for a block that already exists: re-tracing a line you are in the middle
+            // of drawing is just "ย้อนกลับ".
+            onRedraw = existing?.let {
+                {
+                    pendingBlock = null
+                    selectedBlock = null
+                    draft = ParkingDraft(path = it.path, editing = it)
+                }
+            },
             // Cancelling drops back to the map with the draft still there, so a mis-tapped kerb is
             // one tap to correct rather than a re-trace.
             onDismiss = { pendingBlock = null },
