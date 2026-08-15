@@ -23,11 +23,11 @@ fun Side.other(): Side = if (this == Side.LEFT) Side.RIGHT else Side.LEFT
  * at all ([ALWAYS]) are both real, and spelling each side out separately covers them without a
  * special case.
  */
-enum class SideRule(val label: String) {
-    ODD_DAYS("จอดได้วันคี่"),
-    EVEN_DAYS("จอดได้วันคู่"),
-    ALWAYS("จอดได้ทุกวัน"),
-    NEVER("ห้ามจอดตลอด")
+enum class SideRule(val label: String, val shortLabel: String) {
+    ODD_DAYS("จอดได้วันคี่", "วันคี่"),
+    EVEN_DAYS("จอดได้วันคู่", "วันคู่"),
+    ALWAYS("จอดได้ทุกวัน", "ทุกวัน"),
+    NEVER("ห้ามจอดตลอด", "ห้ามจอด")
 }
 
 /**

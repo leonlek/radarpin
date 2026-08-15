@@ -87,6 +87,10 @@ object ParkingRules {
         return if (from < to) m in from until to else m >= from || m < to
     }
 
+    /** The kerb that may be parked on at [at], or null when neither can be — both are real. */
+    fun allowedSide(block: ParkingBlock, at: Long): Side? =
+        Side.entries.firstOrNull { stateOf(block, it, at) == ParkingState.ALLOWED }
+
     /**
      * Whether a car parked on [side] has to be moved before midnight. False on the 31st→1st (both
      * odd, the kerb doesn't swap) and false for a kerb whose rule doesn't depend on the date at

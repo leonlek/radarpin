@@ -137,6 +137,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     var draft by remember { mutableStateOf<ParkingDraft?>(null) }
     var pendingBlock by remember { mutableStateOf<PendingBlock?>(null) }
     var selectedBlock by remember { mutableStateOf<ParkingBlock?>(null) }
+    var showParkingList by remember { mutableStateOf(false) }
     // The instant the kerb colours describe. It only has to move when the answer can change:
     // at midnight always, and every minute for blocks that carry an hours ban.
     var parkingAt by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -385,11 +386,9 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 ) {
                     Text("ทริป")
                 }
-                SmallFloatingActionButton(onClick = {
-                    selectedPoint = null
-                    selectedBlock = null
-                    draft = ParkingDraft()
-                }) {
+                // Mirrors "จุด": the button opens the list of what you've mapped, and drawing a new
+                // one starts from in there — same shape of thing, same way in.
+                SmallFloatingActionButton(onClick = { showParkingList = true }) {
                     Text("ที่จอด", fontSize = 11.sp)
                 }
                 SmallFloatingActionButton(onClick = { showList = true }) {
@@ -486,6 +485,33 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 onClose = { selectedBlock = null }
             )
         }
+    }
+
+    if (showParkingList) {
+        ParkingListDialog(
+            blocks = parkingBlocks,
+            currentLat = location?.latitude,
+            currentLng = location?.longitude,
+            at = parkingAt,
+            onDismiss = { showParkingList = false },
+            onDraw = {
+                showParkingList = false
+                selectedPoint = null
+                selectedBlock = null
+                draft = ParkingDraft()
+            },
+            onFocus = { b ->
+                showParkingList = false
+                selectedPoint = null
+                selectedBlock = b
+                focus = b.center()
+            },
+            onEdit = { b ->
+                showParkingList = false
+                pendingBlock = PendingBlock(b.path, b.pickedSide(), b)
+            },
+            onDelete = { vm.deleteParkingBlock(it) }
+        )
     }
 
     pendingBlock?.let { pending ->

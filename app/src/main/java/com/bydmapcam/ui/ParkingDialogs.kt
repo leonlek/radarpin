@@ -2,6 +2,7 @@
 
 package com.bydmapcam.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,14 +10,18 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -31,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -285,6 +291,149 @@ fun ParkingInfoCard(
         }
     }
 }
+
+/**
+ * Every block the driver has mapped, nearest first.
+ *
+ * The map is the natural home for these — you look where you are — but it can only show the blocks
+ * on screen, and "did I ever map this soi?" is a question about the ones that aren't. Sorting by
+ * distance answers the other one ("anywhere to park near here tonight?") without a search.
+ */
+@Composable
+fun ParkingListDialog(
+    blocks: List<ParkingBlock>,
+    currentLat: Double?,
+    currentLng: Double?,
+    at: Long,
+    onDismiss: () -> Unit,
+    onDraw: () -> Unit,
+    onFocus: (ParkingBlock) -> Unit,
+    onEdit: (ParkingBlock) -> Unit,
+    onDelete: (ParkingBlock) -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    // null = every block, true = somewhere to park today, false = nowhere.
+    var openToday by remember { mutableStateOf<Boolean?>(null) }
+    val listMaxHeight = (LocalConfiguration.current.screenHeightDp * 0.5f).dp.coerceIn(240.dp, 520.dp)
+
+    val shown = blocks
+        .filter { query.isBlank() || it.name.contains(query.trim(), ignoreCase = true) }
+        .filter { openToday == null || (ParkingRules.allowedSide(it, at) != null) == openToday }
+        .let { list ->
+            if (currentLat != null && currentLng != null) {
+                list.sortedBy { ParkingRules.nearest(it, currentLat, currentLng)?.distanceM ?: Double.MAX_VALUE }
+            } else {
+                list
+            }
+        }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("ปิด") } },
+        dismissButton = { TextButton(onClick = onDraw) { Text("วาดบล็อกใหม่") } },
+        title = { Text("บล็อกจอดรถ (${shown.size}/${blocks.size})") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (blocks.isEmpty()) {
+                    Text("ยังไม่มีบล็อกที่บันทึกไว้ — กด \"วาดบล็อกใหม่\" แล้วแตะตามแนวถนน")
+                } else {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        label = { Text("ค้นหาชื่อ") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(openToday == null, { openToday = null }, { Text("ทั้งหมด") })
+                        FilterChip(openToday == true, { openToday = true }, { Text("วันนี้จอดได้") })
+                        FilterChip(openToday == false, { openToday = false }, { Text("วันนี้จอดไม่ได้") })
+                    }
+                    if (shown.isEmpty()) {
+                        Text("ไม่พบบล็อก")
+                    } else {
+                        LazyColumn(modifier = Modifier.heightIn(max = listMaxHeight)) {
+                            items(shown, key = { it.id }) { b ->
+                                ParkingListRow(
+                                    block = b,
+                                    at = at,
+                                    distanceM = if (currentLat != null && currentLng != null) {
+                                        ParkingRules.nearest(b, currentLat, currentLng)?.distanceM
+                                    } else {
+                                        null
+                                    },
+                                    onFocus = { onFocus(b) },
+                                    onEdit = { onEdit(b) },
+                                    onDelete = { onDelete(b) }
+                                )
+                                HorizontalDivider()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    )
+}
+
+@Composable
+private fun ParkingListRow(
+    block: ParkingBlock,
+    at: Long,
+    distanceM: Double?,
+    onFocus: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val open = ParkingRules.allowedSide(block, at) != null
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onFocus)
+            .padding(vertical = 4.dp)
+    ) {
+        // The colour carries the answer here exactly as it does on the map: green means there is a
+        // kerb to park on today, red means this street has nothing for you.
+        Surface(
+            color = Color((if (open) ParkingState.ALLOWED else ParkingState.WRONG_DAY).color),
+            shape = CircleShape,
+            modifier = Modifier
+                .padding(end = 10.dp)
+                .size(14.dp)
+        ) {}
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = distanceM?.let { "${block.name}  ·  ${distanceText(it)}" } ?: block.name,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = blockDetail(block, at),
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        TextButton(onClick = onEdit) { Text("แก้ไข") }
+        TextButton(onClick = onDelete) { Text("ลบ") }
+    }
+}
+
+/** One line of rules: what each kerb allows, plus the hours ban and today's verdict. Uses the
+ *  short rule labels — a list row has one line to say it in, unlike the card on the map. */
+private fun blockDetail(block: ParkingBlock, at: Long): String = buildString {
+    val rules = Side.entries.map { block.ruleOf(it) }
+    append(rules.joinToString(" / ") { it.shortLabel })
+    if (block.banFromMin != null && block.banToMin != null) {
+        append(" · ห้ามจอด ${minutesToHhMm(block.banFromMin)}–${minutesToHhMm(block.banToMin)}")
+    }
+    append(if (ParkingRules.allowedSide(block, at) != null) " · วันนี้จอดได้" else " · วันนี้จอดไม่ได้")
+}
+
+private fun distanceText(m: Double): String =
+    if (m >= 1000) "%.1f กม.".format(m / 1000.0) else "${m.toInt()} ม."
 
 /**
  * What the app says the moment the car settles on a mapped block — and only when there is

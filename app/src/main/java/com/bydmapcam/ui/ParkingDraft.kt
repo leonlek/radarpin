@@ -45,6 +45,13 @@ fun ParkingBlock.pickedSide(): Side = when {
     else -> Side.LEFT
 }
 
+/** Middle of the traced line — where the camera should land when the block is picked from a list. */
+fun ParkingBlock.center(): Pair<Double, Double> {
+    val first = path.first()
+    val last = path.last()
+    return (first.lat + last.lat) / 2 to (first.lng + last.lng) / 2
+}
+
 /** What the details dialog is about to save: the geometry plus the kerb the driver picked. */
 data class PendingBlock(
     val path: List<GeoPoint>,
