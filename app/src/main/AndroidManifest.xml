@@ -48,6 +48,11 @@
             </intent-filter>
         </service>
 
+        <!-- Tonight's "the kerb swaps at midnight, move the car" reminder. -->
+        <receiver
+            android:name=".parking.ParkingAlarmReceiver"
+            android:exported="false" />
+
         <!-- Opens the app on head-unit power-up, only when the setting is on (default off). -->
         <receiver
             android:name=".boot.BootReceiver"

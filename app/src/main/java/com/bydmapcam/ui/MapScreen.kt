@@ -3,7 +3,9 @@ package com.bydmapcam.ui
 import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,9 +32,11 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -40,7 +44,6 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
@@ -52,14 +55,21 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bydmapcam.R
 import com.bydmapcam.alert.AlertFormat
 import com.bydmapcam.data.AlertPoint
+import com.bydmapcam.data.GeoPoint
+import com.bydmapcam.data.ParkingBlock
+import com.bydmapcam.data.Side
+import com.bydmapcam.data.SideRule
 import com.bydmapcam.data.Trip
 import com.bydmapcam.data.avgKmPerPercent
+import com.bydmapcam.parking.ParkingRules
+import com.bydmapcam.parking.ParkingState
 import com.bydmapcam.location.LocationBus
 import com.bydmapcam.location.LocationService
 import com.bydmapcam.media.MediaLink
@@ -120,6 +130,30 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     var focus by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var headingUp by remember { mutableStateOf(Settings.headingUp(context)) }
     var meIcon by remember { mutableStateOf(Settings.meIcon(context)) }
+
+    // Parking blocks: the kerb lines on the map, the block being drawn, and the one tapped open.
+    val parkingBlocks by vm.parkingBlocks.collectAsState()
+    var parkingLines by remember { mutableStateOf(Settings.parkingLines(context)) }
+    var draft by remember { mutableStateOf<ParkingDraft?>(null) }
+    var pendingBlock by remember { mutableStateOf<PendingBlock?>(null) }
+    var selectedBlock by remember { mutableStateOf<ParkingBlock?>(null) }
+    // The instant the kerb colours describe. It only has to move when the answer can change:
+    // at midnight always, and every minute for blocks that carry an hours ban.
+    var parkingAt by remember { mutableStateOf(System.currentTimeMillis()) }
+    val parkedOn by LocationBus.parkedOn.collectAsState()
+    // Waved away by value, so the next park — a different block, or the same one on another day —
+    // brings the card back without needing a reset anywhere.
+    var parkedNoticeDismissed by remember { mutableStateOf<LocationBus.ParkedOn?>(null) }
+    val timedBlocks = remember(parkingBlocks) { parkingBlocks.any { it.banFromMin != null } }
+    LaunchedEffect(timedBlocks) {
+        while (true) {
+            delay(20_000)
+            val now = System.currentTimeMillis()
+            if (timedBlocks || ParkingRules.dayKey(now) != ParkingRules.dayKey(parkingAt)) {
+                parkingAt = now
+            }
+        }
+    }
     // Shared with the service's over-other-apps card, so a ✕ in either place settles both.
     val dismissedIds by LocationBus.dismissedIds.collectAsState()
     val radioState by RadioPlayer.state.collectAsState()
@@ -158,16 +192,47 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             zoomOutTick = zoomOutTick,
             // A spot picked off the map is not where the car is, so there's no road direction to
             // record — that point warns from every direction, as points always did.
-            onMapLongClick = { lat, lng -> pendingSave = PendingSave(lat, lng, null) },
+            onMapLongClick = { lat, lng ->
+                if (draft == null) pendingSave = PendingSave(lat, lng, null)
+            },
             onMarkerClick = { id ->
                 points.find { it.id == id }?.let {
                     selectedPoint = it
+                    selectedBlock = null
                     focus = it.lat to it.lng
                 }
             },
             focus = focus,
             headingUp = headingUp,
             meIcon = meIcon,
+            parkingBlocks = if (parkingLines) parkingBlocks else emptyList(),
+            parkingAt = parkingAt,
+            draft = draft,
+            onMapTap = { lat, lng ->
+                val d = draft
+                if (d == null) {
+                    false
+                } else {
+                    when (d.stage) {
+                        // Tracing: each tap is another vertex of the block's centre line.
+                        ParkingDraft.Stage.PATH ->
+                            draft = d.copy(path = d.path + GeoPoint(lat, lng))
+                        // Picking the kerb: which side of the traced line the tap fell on IS the
+                        // answer, so it works whether they hit the drawn kerb or the road beside it.
+                        ParkingDraft.Stage.SIDE ->
+                            ParkingRules.nearestOnPath(d.path, lat, lng)?.side?.let { side ->
+                                pendingBlock = PendingBlock(d.path, side)
+                            }
+                    }
+                    true
+                }
+            },
+            onParkingClick = { id ->
+                parkingBlocks.find { it.id == id }?.let {
+                    selectedBlock = it
+                    selectedPoint = null
+                }
+            },
             modifier = Modifier.fillMaxSize()
         )
 
@@ -230,6 +295,34 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 }
             }
 
+            // Parked on a mapped block, with something to act on. Shown here rather than over the
+            // map's bottom half because the driver is stopped and reading, not glancing.
+            parkedOn?.takeIf { it != parkedNoticeDismissed }
+                ?.takeIf { it.state != ParkingState.ALLOWED || it.flipsOvernight }
+                ?.let { p ->
+                    ParkedOnCard(
+                        parked = p,
+                        onDismiss = { parkedNoticeDismissed = p },
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    )
+                }
+
+            // Drawing owns the top strip: it's a mode, and the way out of it has to be in sight.
+            draft?.let { d ->
+                ParkingDrawBar(
+                    draft = d,
+                    onUndo = {
+                        draft = when (d.stage) {
+                            ParkingDraft.Stage.PATH -> d.copy(path = d.path.dropLast(1))
+                            ParkingDraft.Stage.SIDE -> d.copy(stage = ParkingDraft.Stage.PATH)
+                        }
+                    },
+                    onCancel = { draft = null; pendingBlock = null },
+                    onNext = { draft = d.copy(stage = ParkingDraft.Stage.SIDE) },
+                    modifier = Modifier.padding(horizontal = 12.dp)
+                )
+            }
+
             val activePoints = points.filter { it.id in activeIds }
             if (activePoints.isNotEmpty() && activeIds != dismissedIds) {
                 AlertBanner(
@@ -282,22 +375,33 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             SmallFloatingActionButton(onClick = { recenterTick++ }) {
                 LocateIcon(color = MaterialTheme.colorScheme.onPrimaryContainer)
             }
-            // Always there, so the button never moves under you: it starts a trip when none is
-            // running, and asks for the current % when one is.
-            SmallFloatingActionButton(
-                onClick = { if (activeTrip == null) showTripStart = true else showTripSoc = true }
-            ) {
-                Text("ทริป")
-            }
-            SmallFloatingActionButton(onClick = { showList = true }) {
-                Text("จุด")
-            }
-            ExtendedFloatingActionButton(onClick = {
-                location?.let { loc ->
-                    pendingSave = PendingSave(loc.latitude, loc.longitude, drivingHeading(loc))
+            // While a block is being traced the map is a drawing surface: every other button here
+            // would either add something else to it or take you off it mid-draw.
+            if (draft == null) {
+                // Always there, so the button never moves under you: it starts a trip when none is
+                // running, and asks for the current % when one is.
+                SmallFloatingActionButton(
+                    onClick = { if (activeTrip == null) showTripStart = true else showTripSoc = true }
+                ) {
+                    Text("ทริป")
                 }
-            }) {
-                Text("บันทึกจุดนี้")
+                SmallFloatingActionButton(onClick = {
+                    selectedPoint = null
+                    selectedBlock = null
+                    draft = ParkingDraft()
+                }) {
+                    Text("ที่จอด", fontSize = 11.sp)
+                }
+                SmallFloatingActionButton(onClick = { showList = true }) {
+                    Text("จุด")
+                }
+                ExtendedFloatingActionButton(onClick = {
+                    location?.let { loc ->
+                        pendingSave = PendingSave(loc.latitude, loc.longitude, drivingHeading(loc))
+                    }
+                }) {
+                    Text("บันทึกจุดนี้")
+                }
             }
         }
 
@@ -365,6 +469,46 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 onClose = { selectedPoint = null }
             )
         }
+
+        selectedBlock?.let { b ->
+            ParkingInfoCard(
+                block = b,
+                at = parkingAt,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(12.dp),
+                onEdit = {
+                    pendingBlock = PendingBlock(b.path, b.pickedSide(), b)
+                    selectedBlock = null
+                },
+                onDelete = { vm.deleteParkingBlock(b); selectedBlock = null },
+                onClose = { selectedBlock = null }
+            )
+        }
+    }
+
+    pendingBlock?.let { pending ->
+        val existing = pending.existing
+        ParkingBlockDialog(
+            title = if (existing == null) "บล็อกจอดรถ" else "แก้ไขบล็อกจอดรถ",
+            oddSide = pending.oddSide,
+            initialName = existing?.name ?: "บล็อก ${parkingBlocks.size + 1}",
+            initialLeft = existing?.leftRule
+                ?: if (pending.oddSide == Side.LEFT) SideRule.ODD_DAYS else SideRule.EVEN_DAYS,
+            initialRight = existing?.rightRule
+                ?: if (pending.oddSide == Side.LEFT) SideRule.EVEN_DAYS else SideRule.ODD_DAYS,
+            initialBanFrom = existing?.banFromMin,
+            initialBanTo = existing?.banToMin,
+            // Cancelling drops back to the map with the draft still there, so a mis-tapped kerb is
+            // one tap to correct rather than a re-trace.
+            onDismiss = { pendingBlock = null },
+            onSave = { form ->
+                vm.saveParkingBlock(pending, form)
+                pendingBlock = null
+                draft = null
+            }
+        )
     }
 
     pendingSave?.let { pending ->
@@ -486,6 +630,8 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             onHeadingUpChange = { headingUp = it; Settings.setHeadingUp(context, it) },
             meIcon = meIcon,
             onMeIconChange = { meIcon = it; Settings.setMeIcon(context, it) },
+            parkingLines = parkingLines,
+            onParkingLinesChange = { parkingLines = it; Settings.setParkingLines(context, it) },
             onOpenTripHistory = { showSettings = false; showTripHistory = true },
             onImportCameras = {
                 Toast.makeText(context, "กำลังนำเข้าฐานกล้อง…", Toast.LENGTH_SHORT).show()
@@ -519,11 +665,32 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                         if (TripTracker.active.value == null) vm.startTrip(85)
                     }
                     SimScenario.OVERLAY -> LocationService.simulateOverlay(context)
+                    // The real thing needs two minutes of standing still, which is two minutes
+                    // nobody will spend at a desk; the card reads the same bus either way.
+                    SimScenario.PARK_WRONG -> LocationBus.updateParkedOn(
+                        LocationBus.ParkedOn(
+                            blockId = -1L,
+                            blockName = "ซอยอารีย์ 5 ต้นซอย",
+                            side = Side.LEFT,
+                            state = ParkingState.WRONG_DAY,
+                            flipsOvernight = false
+                        )
+                    )
+                    SimScenario.PARK_FLIP -> LocationBus.updateParkedOn(
+                        LocationBus.ParkedOn(
+                            blockId = -1L,
+                            blockName = "ซอยอารีย์ 5 ต้นซอย",
+                            side = Side.RIGHT,
+                            state = ParkingState.ALLOWED,
+                            flipsOvernight = true
+                        )
+                    )
                     SimScenario.MEDIA -> Simulator.media()
                     SimScenario.TRIP -> vm.startTrip(85)
                     SimScenario.OFF -> {
                         Simulator.clear()
                         LocationService.clearSimulatedOverlay(context)
+                        LocationBus.updateParkedOn(null)
                         vm.cancelTrip()
                     }
                 }
@@ -535,7 +702,10 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     }
 }
 
-enum class SimScenario { ALERT_FAR, ALERT_EV, ALERT_POI, ALERT_NEAR, ALERT_TWO, INFO_POP, OVERLAY, MEDIA, TRIP, ALL, OFF }
+enum class SimScenario {
+    ALERT_FAR, ALERT_EV, ALERT_POI, ALERT_NEAR, ALERT_TWO, INFO_POP, OVERLAY,
+    PARK_WRONG, PARK_FLIP, MEDIA, TRIP, ALL, OFF
+}
 
 /** Emulator-only shortcut list for putting the UI into each state worth looking at. */
 @Composable
@@ -567,6 +737,10 @@ private fun SimulateDialog(
                 SimRow("⚠ กล้อง 2 ตัวพร้อมกัน (มีบรรทัดถัดไป)") { onPick(SimScenario.ALERT_TWO) }
                 SimRow("ℹ︎ จุดแบบ info (ไอคอนเด้ง ไม่มีแบนเนอร์)") { onPick(SimScenario.INFO_POP) }
                 SimRow("📱 การ์ดนอกแอป (กด Home ต่อ)") { onPick(SimScenario.OVERLAY) }
+
+                SimHeader("ที่จอดรถ")
+                SimRow("🅿️ จอดผิดฝั่ง") { onPick(SimScenario.PARK_WRONG) }
+                SimRow("🅿️ จอดถูกฝั่ง แต่เที่ยงคืนสลับ") { onPick(SimScenario.PARK_FLIP) }
 
                 SimHeader("ส่วนอื่นของแอป")
                 SimRow("🎵 แถบเพลง") { onPick(SimScenario.MEDIA) }
@@ -660,11 +834,11 @@ private fun AlertBanner(
         shape = MaterialTheme.shapes.medium,
         shadowElevation = 6.dp
     ) {
-        Row(verticalAlignment = Alignment.Top) {
+        Box {
             Column(
                 Modifier
-                    .weight(1f)
-                    .padding(start = 20.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, top = 12.dp, bottom = 12.dp, end = 88.dp)
             ) {
                 Text(
                     text = header,
@@ -677,10 +851,27 @@ private fun AlertBanner(
                     Text(text = "• ${it.name}$tail", color = Color.White)
                 }
             }
-            TextButton(onClick = onDismiss) {
-                Text("✕", color = Color.White, fontSize = 20.sp)
-            }
+            DismissCorner(cornerRadius = 12.dp, onDismiss = onDismiss)
         }
+    }
+}
+
+/**
+ * The ✕ owns the whole top-right corner of a banner, edge to edge. A glyph-sized button is
+ * unhittable from the driver's seat of a moving car; the glyph only marks where the target is.
+ */
+@Composable
+internal fun BoxScope.DismissCorner(cornerRadius: Dp, onDismiss: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .align(Alignment.TopEnd)
+            .size(width = 84.dp, height = 64.dp)
+            .clip(RoundedCornerShape(topEnd = cornerRadius))
+            .clickable(onClick = onDismiss)
+            .padding(top = 10.dp, end = 16.dp),
+        contentAlignment = Alignment.TopEnd
+    ) {
+        Text("✕", color = Color.White, fontSize = 22.sp)
     }
 }
 
@@ -710,84 +901,79 @@ private fun AlertRail(
         shape = MaterialTheme.shapes.large,
         shadowElevation = 6.dp
     ) {
-        Column(Modifier.padding(start = 18.dp, top = 12.dp, end = 12.dp, bottom = 16.dp)) {
-            Row(verticalAlignment = Alignment.Top) {
+        Box {
+            Column(Modifier.padding(start = 18.dp, top = 12.dp, end = 12.dp, bottom = 16.dp)) {
                 Text(
                     text = lead.type.label,
                     color = Color.White.copy(alpha = .88f),
                     style = MaterialTheme.typography.labelLarge,
                     letterSpacing = 1.sp,
-                    modifier = Modifier.weight(1f).padding(top = 6.dp)
+                    modifier = Modifier.padding(top = 6.dp, end = 76.dp)
                 )
-                TextButton(
-                    onClick = onDismiss,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text("✕", color = Color.White, fontSize = 21.sp)
-                }
-            }
 
-            if (leadDistance != null && leadDistance >= AlertFormat.FLOOR_M) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        text = "$leadDistance",
-                        color = Color.White,
-                        fontSize = 62.sp,
-                        fontWeight = FontWeight.Bold,
-                        style = TextStyle(fontFeatureSettings = "tnum"),
-                        lineHeight = 64.sp
-                    )
-                    Text(
-                        text = " ม.",
-                        color = Color.White.copy(alpha = .9f),
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                }
-            } else {
-                Text(
-                    text = "ถึงจุดแล้ว",
-                    color = Color.White,
-                    fontSize = 44.sp,
-                    fontWeight = FontWeight.Bold,
-                    lineHeight = 50.sp
-                )
-            }
-
-            Text(
-                text = lead.name,
-                color = Color.White,
-                style = MaterialTheme.typography.titleLarge,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            // Only ever one line about what's behind it — a list would be unreadable at speed.
-            sorted.getOrNull(1)?.let { next ->
-                HorizontalDivider(
-                    color = Color.White.copy(alpha = .3f),
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-                Row {
-                    Text(
-                        text = "ถัดไป · ${next.name}",
-                        color = Color.White.copy(alpha = .9f),
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    distances[next.id]?.let {
+                if (leadDistance != null && leadDistance >= AlertFormat.FLOOR_M) {
+                    Row(verticalAlignment = Alignment.Bottom) {
                         Text(
-                            text = "  $it ม.",
+                            text = "$leadDistance",
                             color = Color.White,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
+                            fontSize = 62.sp,
+                            fontWeight = FontWeight.Bold,
+                            style = TextStyle(fontFeatureSettings = "tnum"),
+                            lineHeight = 64.sp
                         )
+                        Text(
+                            text = " ม.",
+                            color = Color.White.copy(alpha = .9f),
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "ถึงจุดแล้ว",
+                        color = Color.White,
+                        fontSize = 44.sp,
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 50.sp
+                    )
+                }
+
+                Text(
+                    text = lead.name,
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                // Only ever one line about what's behind it — a list would be unreadable at speed.
+                sorted.getOrNull(1)?.let { next ->
+                    HorizontalDivider(
+                        color = Color.White.copy(alpha = .3f),
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                    Row {
+                        Text(
+                            text = "ถัดไป · ${next.name}",
+                            color = Color.White.copy(alpha = .9f),
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        distances[next.id]?.let {
+                            Text(
+                                text = "  $it ม.",
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
             }
+            DismissCorner(cornerRadius = 16.dp, onDismiss = onDismiss)
         }
     }
 }

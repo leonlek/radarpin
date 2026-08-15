@@ -17,6 +17,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
@@ -30,6 +31,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.bydmapcam.MainActivity
@@ -38,8 +40,14 @@ import com.bydmapcam.alert.AlertFormat
 import com.bydmapcam.alert.Beeper
 import com.bydmapcam.alert.Speaker
 import com.bydmapcam.data.AlertPoint
+import com.bydmapcam.data.ParkingBlock
+import com.bydmapcam.data.ParkingRepository
 import com.bydmapcam.data.PointRepository
 import com.bydmapcam.data.PointType
+import com.bydmapcam.parking.ParkingAlarm
+import com.bydmapcam.parking.ParkingNotifier
+import com.bydmapcam.parking.ParkingRules
+import com.bydmapcam.parking.ParkingState
 import com.bydmapcam.settings.Settings
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.launchIn
@@ -55,9 +63,13 @@ class LocationService : LifecycleService(), LocationListener {
     private lateinit var locationManager: LocationManager
     private lateinit var displayManager: DisplayManager
     private lateinit var repository: PointRepository
+    private lateinit var parkingRepository: ParkingRepository
 
     @Volatile
     private var points: List<AlertPoint> = emptyList()
+
+    @Volatile
+    private var parkingBlocks: List<ParkingBlock> = emptyList()
     private var insideIds: Set<Long> = emptySet()
     private var lastLocation: Location? = null
     private var overlayView: View? = null
@@ -75,6 +87,15 @@ class LocationService : LifecycleService(), LocationListener {
 
     /** Parked inside an alert zone → alerts muted until the car drives off again. */
     private var parked = false
+
+    /**
+     * Whether the current parked spell has been judged against the parking blocks. Not the same
+     * question as [parked]: the car can already be standing still when we first learn where it is
+     * — the app opened after the driver got out, the head unit rebooted overnight, the blocks
+     * arrived from the database a moment later — and every one of those is a park we never saw
+     * begin, so hanging the check on the transition alone loses it.
+     */
+    private var parkedChecked = false
 
     /** When each point last raised a warning, so a U-turn doesn't raise the same one twice.
      *  In memory only: the service outlives any single drive, and a restart is a fresh road. */
@@ -119,6 +140,7 @@ class LocationService : LifecycleService(), LocationListener {
     override fun onCreate() {
         super.onCreate()
         repository = PointRepository(this)
+        parkingRepository = ParkingRepository(this)
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         // Start out parked if that's how we were left: otherwise re-opening the app while parked
         // inside a camera's radius beeps + banners all over again every single time.
@@ -126,6 +148,18 @@ class LocationService : LifecycleService(), LocationListener {
 
         repository.observeAll()
             .onEach { points = it; recompute() }
+            .launchIn(lifecycleScope)
+
+        // Kept in memory for the same reason the points are: the check runs the instant the car
+        // settles, which is no time to be waiting on a query.
+        parkingRepository.observeAll()
+            .onEach {
+                parkingBlocks = it
+                // Drawing the block you are standing on should answer the question right then,
+                // not on the next drive, so a change to the blocks re-opens the verdict.
+                parkedChecked = false
+                recompute()
+            }
             .launchIn(lifecycleScope)
 
         // Show/hide the over-other-apps overlay as our own UI comes and goes.
@@ -282,6 +316,9 @@ class LocationService : LifecycleService(), LocationListener {
     private fun recompute() {
         val loc = lastLocation ?: return
         updateParked(loc)
+        // Judged once per parked spell. Deliberately runs even with no blocks at all: that is how
+        // deleting the block you're parked on takes its warning and its alarm down with it.
+        if (parked && !parkedChecked) checkParkingBlock()
         val now = System.currentTimeMillis()
         val nowInside = mutableSetOf<Long>()
         val nowInfo = mutableSetOf<Long>()
@@ -402,10 +439,68 @@ class LocationService : LifecycleService(), LocationListener {
         parked = value
         getSharedPreferences(STATE_PREF, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_PARKED, value).apply()
+        if (!value) clearParkingState()
         // Standing still for minutes and then driving off is the car being used again, told by the
         // one signal that needs nothing from the head unit: the GPS. On a unit that neither boots
         // nor reports its screen, this is the only thing left that can bring the app back up.
         if (wasParked && !value) autoOpen(Settings.DRIVE_ACTION)
+    }
+
+    /**
+     * The car has just settled: if it did so on a mapped block, say whether this kerb is the right
+     * one today — and if it is, but only until midnight, book tonight's reminder.
+     *
+     * Only ever runs on the moment of parking. Re-checking every tick would re-notify each time a
+     * GPS fix wobbled across the centre line, and the answer can't change while the car is still.
+     */
+    private fun checkParkingBlock() {
+        val loc = lastLocation ?: return
+        // The first fix after a restart is whatever the system had lying around, which can be an
+        // hour old and a district away — and judging a kerb by it means warning about a street the
+        // car isn't on. Wait for a real one; [parkedChecked] stays false so the next tick retries.
+        val fixAgeMs = (SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos) / 1_000_000L
+        if (fixAgeMs > FIX_FRESH_MS) return
+        parkedChecked = true
+        val hit = ParkingRules.blockAt(parkingBlocks, loc.latitude, loc.longitude)
+        if (hit == null) {
+            clearParkingState()
+            return
+        }
+        val (block, near) = hit
+        // Which kerb the car is on is a *sign*, and a fix that lands within its own error of the
+        // centre line has no trustworthy sign at all. Saying nothing beats telling someone parked
+        // legally to move: they'd move to the kerb that really is wrong.
+        val ambiguous = maxOf(SIDE_MIN_M, if (loc.hasAccuracy()) loc.accuracy * 0.5f else 0f).toDouble()
+        if (near.distanceM < ambiguous) {
+            clearParkingState()
+            return
+        }
+        val now = System.currentTimeMillis()
+        val state = ParkingRules.stateOf(block, near.side, now)
+        val flips = ParkingRules.flipsOvernight(block, near.side, now)
+        LocationBus.updateParkedOn(
+            LocationBus.ParkedOn(block.id, block.name, near.side, state, flips)
+        )
+
+        // Wipe the last verdict before posting this one: re-parking a few metres up the street can
+        // turn "wrong kerb" into "fine until midnight", and the old card must not outlive it.
+        ParkingAlarm.cancel(this)
+        ParkingNotifier.clear(this)
+        if (state != ParkingState.ALLOWED) {
+            ParkingNotifier.wrongSide(this, block.name, state)
+            return
+        }
+        if (flips && Settings.parkingReminder(this)) {
+            ParkingAlarm.schedule(this, block.name, ParkingRules.reminderAt(now))
+        }
+    }
+
+    /** Driving off ends every parking message: none of them are true about a moving car. */
+    private fun clearParkingState() {
+        parkedChecked = false
+        LocationBus.updateParkedOn(null)
+        ParkingAlarm.cancel(this)
+        ParkingNotifier.clear(this)
     }
 
     /** How far off our path a point may sit and still count as "on this road", at distance [d]. */
@@ -494,22 +589,18 @@ class LocationService : LifecycleService(), LocationListener {
             val typeView = TextView(this).apply {
                 setTextColor(0xE0FFFFFF.toInt())
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                // Keeps the label clear of the ✕ corner hotspot laid over it.
+                setPadding(0, dp(4), dp(56), 0)
             }
+            // Mirrors the in-app rail's DismissCorner: the tap target is the whole top-right
+            // corner of the card, not the glyph, so it can be hit from the driver's seat.
             val dismiss = TextView(this).apply {
                 text = "✕"
                 setTextColor(0xFFFFFFFF.toInt())
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
-                setPadding(dp(16), 0, dp(4), dp(4))
+                gravity = Gravity.TOP or Gravity.END
+                setPadding(dp(30), dp(10), dp(14), dp(26))
                 setOnClickListener { dismissOverlay() }
-            }
-            val header = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.TOP
-                addView(
-                    typeView,
-                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                )
-                addView(dismiss)
             }
             val distanceView = TextView(this).apply {
                 setTextColor(0xFFFFFFFF.toInt())
@@ -536,17 +627,24 @@ class LocationService : LifecycleService(), LocationListener {
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
                 setPadding(0, dp(6), 0, 0)
             }
-            val root = LinearLayout(this).apply {
+            val content = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(18), dp(10), dp(12), dp(14))
-                background = GradientDrawable().apply { cornerRadius = dp(20).toFloat() }
-                // Whole card opens the app; only the ✕ swallows its own tap.
-                setOnClickListener { openApp() }
-                addView(header, LinearLayout.LayoutParams(MATCH, WRAP))
+                addView(typeView, LinearLayout.LayoutParams(MATCH, WRAP))
                 addView(distanceView)
                 addView(nameView)
                 addView(nextView)
                 addView(hint)
+            }
+            val root = FrameLayout(this).apply {
+                background = GradientDrawable().apply { cornerRadius = dp(20).toFloat() }
+                // Whole card opens the app; only the ✕ corner swallows its own tap.
+                setOnClickListener { openApp() }
+                addView(content, FrameLayout.LayoutParams(MATCH, WRAP))
+                addView(
+                    dismiss,
+                    FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END)
+                )
             }
             val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -651,6 +749,10 @@ class LocationService : LifecycleService(), LocationListener {
         private const val PARKED_KMH = 2f          // below this the car is standing still
         private const val UNPARK_KMH = 10f         // above this it has genuinely driven off
         private const val PARKED_AFTER_MS = 120_000L // stopped this long = parked -> mute alerts
+        /** Closer than this to a block's centre line and the kerb the car is on is a coin toss. */
+        private const val SIDE_MIN_M = 4f
+        /** How old a fix may be and still be worth judging a parking spot by. */
+        private const val FIX_FRESH_MS = 60_000L
         private const val STATE_PREF = "alert_state"
         private const val KEY_PARKED = "parked"
 

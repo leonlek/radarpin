@@ -34,6 +34,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.bydmapcam.media.MediaLink
+import com.bydmapcam.parking.ParkingRules
 import com.bydmapcam.settings.MeIcon
 import com.bydmapcam.settings.Settings
 import java.text.SimpleDateFormat
@@ -46,6 +47,8 @@ fun SettingsDialog(
     onHeadingUpChange: (Boolean) -> Unit,
     meIcon: MeIcon,
     onMeIconChange: (MeIcon) -> Unit,
+    parkingLines: Boolean,
+    onParkingLinesChange: (Boolean) -> Unit,
     onImportCameras: () -> Unit,
     onOpenOffline: () -> Unit,
     onOpenTripHistory: () -> Unit,
@@ -56,6 +59,7 @@ fun SettingsDialog(
     var overlay by remember { mutableStateOf(Settings.overlayEnabled(context)) }
     var directionAware by remember { mutableStateOf(Settings.directionAware(context)) }
     var autoBoot by remember { mutableStateOf(Settings.autoStartOnBoot(context)) }
+    var parkingReminder by remember { mutableStateOf(Settings.parkingReminder(context)) }
     val mediaAccess = MediaLink.hasAccess(context)
 
     AlertDialog(
@@ -158,6 +162,25 @@ fun SettingsDialog(
                                     )
                                 }
                             }
+                        }
+                    )
+                }
+                HorizontalDivider()
+                SettingRow(
+                    title = "แสดงเส้นที่จอดรถ",
+                    subtitle = "ระบายขอบถนนที่บันทึกไว้ — เขียว = วันนี้จอดฝั่งนี้ได้ แดง = ห้าม (เห็นตอนซูมเข้า)"
+                ) {
+                    Switch(checked = parkingLines, onCheckedChange = onParkingLinesChange)
+                }
+                SettingRow(
+                    title = "เตือนย้ายรถก่อนเที่ยงคืน",
+                    subtitle = "จอดถูกฝั่งแต่พรุ่งนี้สลับ — เตือน ${minutesToHhMm(ParkingRules.REMIND_HOUR * 60 + ParkingRules.REMIND_MINUTE)} น. ให้ย้ายทัน"
+                ) {
+                    Switch(
+                        checked = parkingReminder,
+                        onCheckedChange = {
+                            parkingReminder = it
+                            Settings.setParkingReminder(context, it)
                         }
                     )
                 }

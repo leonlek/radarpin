@@ -5,6 +5,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.data.CameraImport
+import com.bydmapcam.data.ParkingBlock
+import com.bydmapcam.data.ParkingRepository
 import com.bydmapcam.data.PointRepository
 import com.bydmapcam.data.PointType
 import com.bydmapcam.data.Trip
@@ -20,9 +22,14 @@ import kotlinx.coroutines.withContext
 class MapViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = PointRepository(app)
     private val tripRepo = TripRepository(app)
+    private val parkingRepo = ParkingRepository(app)
 
     val points: StateFlow<List<AlertPoint>> =
         repo.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val parkingBlocks: StateFlow<List<ParkingBlock>> =
+        parkingRepo.observeAll()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val recentTrips: StateFlow<List<Trip>> =
         tripRepo.observeRecent().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -69,6 +76,40 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 )
             )
         }
+    }
+
+    /** Save a freshly drawn block, or the same block again with edited rules. */
+    fun saveParkingBlock(pending: PendingBlock, form: ParkingFormResult) {
+        viewModelScope.launch {
+            val existing = pending.existing
+            if (existing == null) {
+                parkingRepo.add(
+                    ParkingBlock(
+                        name = form.name,
+                        path = pending.path,
+                        leftRule = form.leftRule,
+                        rightRule = form.rightRule,
+                        banFromMin = form.banFromMin,
+                        banToMin = form.banToMin,
+                        createdAt = System.currentTimeMillis()
+                    )
+                )
+            } else {
+                parkingRepo.update(
+                    existing.copy(
+                        name = form.name,
+                        leftRule = form.leftRule,
+                        rightRule = form.rightRule,
+                        banFromMin = form.banFromMin,
+                        banToMin = form.banToMin
+                    )
+                )
+            }
+        }
+    }
+
+    fun deleteParkingBlock(block: ParkingBlock) {
+        viewModelScope.launch { parkingRepo.delete(block) }
     }
 
     fun delete(point: AlertPoint) {

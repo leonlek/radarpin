@@ -8,11 +8,16 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [AlertPoint::class, Trip::class], version = 6, exportSchema = false)
+@Database(
+    entities = [AlertPoint::class, Trip::class, ParkingBlock::class],
+    version = 7,
+    exportSchema = false
+)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun alertPointDao(): AlertPointDao
     abstract fun tripDao(): TripDao
+    abstract fun parkingBlockDao(): ParkingBlockDao
 
     companion object {
         @Volatile
@@ -60,6 +65,25 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Parking blocks are a second, independent kind of thing on the map — a stretch of
+                // kerb with a rule, not a point with a radius — so they get their own table rather
+                // than more nullable columns on alert_points.
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS parking_blocks (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "name TEXT NOT NULL, " +
+                        "path TEXT NOT NULL, " +
+                        "leftRule TEXT NOT NULL, " +
+                        "rightRule TEXT NOT NULL, " +
+                        "banFromMin INTEGER, " +
+                        "banToMin INTEGER, " +
+                        "createdAt INTEGER NOT NULL)"
+                )
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -67,7 +91,8 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "byd-map-cam.db"
                 ).addMigrations(
-                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6
+                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
+                    MIGRATION_6_7
                 )
                     .build().also { INSTANCE = it }
             }

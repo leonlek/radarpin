@@ -39,8 +39,12 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleEventObserver
 import com.bydmapcam.R
 import com.bydmapcam.data.AlertPoint
+import com.bydmapcam.data.ParkingBlock
 import com.bydmapcam.data.PointType
+import com.bydmapcam.data.Side
 import com.bydmapcam.location.AppState
+import com.bydmapcam.parking.ParkingRules
+import com.bydmapcam.parking.ParkingState
 import com.bydmapcam.settings.MeIcon
 import com.bydmapcam.offline.MapCamera
 import org.maplibre.android.camera.CameraPosition
@@ -59,6 +63,7 @@ import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
+import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 import org.maplibre.geojson.Polygon
 import kotlinx.coroutines.launch
@@ -74,6 +79,15 @@ private const val SRC_CENTERS = "src-centers"
 private const val SRC_INFO = "src-info"
 private const val SRC_PING = "src-ping"
 private const val SRC_ME = "src-me"
+private const val SRC_PARKING = "src-parking"
+private const val SRC_DRAFT = "src-draft"
+private const val SRC_DRAFT_PTS = "src-draft-pts"
+
+/** How far off the centre line each kerb is drawn, in screen pixels at any zoom. */
+private const val KERB_OFFSET_PX = 7f
+
+/** Below this the kerbs are hair-thin clutter over a whole district; a parked car is never here. */
+private const val PARKING_MIN_ZOOM = 14f
 
 // Follow-camera glide duration ≈ the GPS update interval, so the map moves continuously
 // between fixes instead of hopping. Linear easing (see easeCamera(..., false)).
@@ -113,6 +127,15 @@ fun MapLibreMap(
     focus: Pair<Double, Double>?,
     headingUp: Boolean,
     meIcon: MeIcon,
+    /** Parking blocks to paint; empty when the driver has turned the kerb lines off. */
+    parkingBlocks: List<ParkingBlock> = emptyList(),
+    /** The instant the kerb colours describe. Only changes when the answer can have changed. */
+    parkingAt: Long = 0L,
+    /** A block being drawn right now, drawn as a draft over the saved ones. */
+    draft: ParkingDraft? = null,
+    /** Consumes a plain tap while drawing; true means "handled, don't treat it as a normal tap". */
+    onMapTap: (lat: Double, lng: Double) -> Boolean = { _, _ -> false },
+    onParkingClick: (id: Long) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -121,6 +144,8 @@ fun MapLibreMap(
     // why tapping a point saved after launch did nothing at all.
     val onMarkerClickNow by rememberUpdatedState(onMarkerClick)
     val onMapLongClickNow by rememberUpdatedState(onMapLongClick)
+    val onMapTapNow by rememberUpdatedState(onMapTap)
+    val onParkingClickNow by rememberUpdatedState(onParkingClick)
     val density = LocalDensity.current
     val navBarInsetPx = WindowInsets.navigationBars.getBottom(density)
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -184,6 +209,11 @@ fun MapLibreMap(
                 // markers were so fiddly to hit. INFO points are queried too; they're a separate
                 // layer and used to ignore taps entirely.
                 m.addOnMapClickListener { latLng ->
+                    // While a block is being drawn every tap belongs to the drawing, including one
+                    // that lands on a marker — the map is a canvas for that stretch.
+                    if (onMapTapNow(latLng.latitude, latLng.longitude)) {
+                        return@addOnMapClickListener true
+                    }
                     val screen = m.projection.toScreenLocation(latLng)
                     val slop = TAP_SLOP_DP * context.resources.displayMetrics.density
                     val box = RectF(screen.x - slop, screen.y - slop, screen.x + slop, screen.y + slop)
@@ -191,6 +221,14 @@ fun MapLibreMap(
                         .firstOrNull()?.getNumberProperty("id")?.toLong()
                     if (hitId != null) {
                         onMarkerClickNow(hitId)
+                        return@addOnMapClickListener true
+                    }
+                    // Points win ties: a kerb line is long and easy to hit by accident, a marker is
+                    // small and deliberate.
+                    val blockId = m.queryRenderedFeatures(box, "lyr-parking-left", "lyr-parking-right")
+                        .firstOrNull()?.getNumberProperty("id")?.toLong()
+                    if (blockId != null) {
+                        onParkingClickNow(blockId)
                         true
                     } else {
                         false
@@ -211,6 +249,21 @@ fun MapLibreMap(
         val s = style ?: return@LaunchedEffect
         if (!inForeground) return@LaunchedEffect
         updatePointSources(s, points, activeIds)
+    }
+
+    // Parking kerbs. Rebuilt only when the blocks change or [parkingAt] moves — which is midnight
+    // for most streets, so this normally runs once a day and then never again.
+    LaunchedEffect(parkingBlocks, parkingAt, style, inForeground) {
+        val s = style ?: return@LaunchedEffect
+        if (!inForeground) return@LaunchedEffect
+        updateParkingSource(s, parkingBlocks, parkingAt)
+    }
+
+    // The block being traced. Redrawn on every tap, but a draft is a handful of vertices and the
+    // driver is stopped while drawing one.
+    LaunchedEffect(draft, style) {
+        val s = style ?: return@LaunchedEffect
+        updateDraftSources(s, draft)
     }
 
     // INFO pop: enlarged icon + details for points currently within ~200 m. The distance is rounded
@@ -417,6 +470,10 @@ private fun alertColorByType(): Expression = Expression.match(
 private fun colorHex(argb: Long): String = "#%06X".format(argb and 0xFFFFFF)
 
 private fun setupLayers(style: Style) {
+    // Parking kerbs go in first so every marker, ring and label stays on top of them: they are
+    // information about the street itself, not something that competes with a warning.
+    setupParkingLayers(style)
+
     // The live ring matches its banner, so a green card never sits over a red circle.
     style.addSource(GeoJsonSource(SRC_ACTIVE))
     style.addLayer(
@@ -511,6 +568,124 @@ private fun setupLayers(style: Style) {
             // Rotate the arrow to the driving direction (property "bearing"), relative to the map.
             PropertyFactory.iconRotate(Expression.get("bearing")),
             PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP)
+        )
+    )
+}
+
+/**
+ * Two lines per block, one per kerb, drawn by offsetting the same centre line to either side. The
+ * offset is MapLibre's own (`lineOffset`, positive = right of the drawn direction), so the kerbs
+ * stay the same width apart at every zoom and nothing has to be re-projected as the map moves.
+ */
+private fun setupParkingLayers(style: Style) {
+    style.addSource(GeoJsonSource(SRC_PARKING))
+    listOf(
+        "lyr-parking-left" to -KERB_OFFSET_PX,
+        "lyr-parking-right" to KERB_OFFSET_PX
+    ).forEach { (id, offset) ->
+        val side = if (offset < 0) Side.LEFT else Side.RIGHT
+        style.addLayer(
+            LineLayer(id, SRC_PARKING).withProperties(
+                PropertyFactory.lineColor(parkingColorByState()),
+                PropertyFactory.lineWidth(5f),
+                PropertyFactory.lineOffset(offset),
+                PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                PropertyFactory.lineOpacity(0.9f)
+            ).withFilter(Expression.eq(Expression.get("side"), Expression.literal(side.name)))
+                .also { it.minZoom = PARKING_MIN_ZOOM }
+        )
+    }
+
+    // The block being drawn: the traced centre line, its vertices, and — at the side-picking step —
+    // both kerbs in grey with the chosen one already green, so the tap has something to answer.
+    style.addSource(GeoJsonSource(SRC_DRAFT))
+    listOf(
+        "lyr-draft-left" to -KERB_OFFSET_PX,
+        "lyr-draft-right" to KERB_OFFSET_PX
+    ).forEach { (id, offset) ->
+        val side = if (offset < 0) Side.LEFT else Side.RIGHT
+        style.addLayer(
+            LineLayer(id, SRC_DRAFT).withProperties(
+                PropertyFactory.lineColor(Expression.get("color")),
+                PropertyFactory.lineWidth(6f),
+                PropertyFactory.lineOffset(offset),
+                PropertyFactory.lineCap(Property.LINE_CAP_ROUND)
+            ).withFilter(Expression.eq(Expression.get("side"), Expression.literal(side.name)))
+        )
+    }
+    style.addLayer(
+        LineLayer("lyr-draft-line", SRC_DRAFT).withProperties(
+            PropertyFactory.lineColor(android.graphics.Color.parseColor("#1565C0")),
+            PropertyFactory.lineWidth(3f),
+            PropertyFactory.lineDasharray(arrayOf(2f, 2f))
+        ).withFilter(Expression.eq(Expression.get("side"), Expression.literal("CENTER")))
+    )
+    style.addSource(GeoJsonSource(SRC_DRAFT_PTS))
+    style.addLayer(
+        CircleLayer("lyr-draft-pts", SRC_DRAFT_PTS).withProperties(
+            PropertyFactory.circleRadius(6f),
+            PropertyFactory.circleColor(android.graphics.Color.WHITE),
+            PropertyFactory.circleStrokeWidth(3f),
+            PropertyFactory.circleStrokeColor(android.graphics.Color.parseColor("#1565C0"))
+        )
+    )
+}
+
+/** Colour straight off the state, so the map, the info card and the warning can never disagree. */
+private fun parkingColorByState(): Expression = Expression.match(
+    Expression.get("state"),
+    Expression.literal(ParkingState.ALLOWED.name),
+    Expression.literal(colorHex(ParkingState.ALLOWED.color)),
+    Expression.literal(ParkingState.BANNED_NOW.name),
+    Expression.literal(colorHex(ParkingState.BANNED_NOW.color)),
+    Expression.literal(ParkingState.BANNED_ALWAYS.name),
+    Expression.literal(colorHex(ParkingState.BANNED_ALWAYS.color)),
+    Expression.literal(colorHex(ParkingState.WRONG_DAY.color))
+)
+
+private fun updateParkingSource(style: Style, blocks: List<ParkingBlock>, at: Long) {
+    val feats = ArrayList<Feature>(blocks.size * 2)
+    for (b in blocks) {
+        if (b.path.size < 2) continue
+        val line = LineString.fromLngLats(b.path.map { Point.fromLngLat(it.lng, it.lat) })
+        for (side in Side.entries) {
+            feats.add(
+                Feature.fromGeometry(line).apply {
+                    addNumberProperty("id", b.id)
+                    addStringProperty("side", side.name)
+                    addStringProperty("state", ParkingRules.stateOf(b, side, at).name)
+                }
+            )
+        }
+    }
+    style.getSourceAs<GeoJsonSource>(SRC_PARKING)?.setGeoJson(FeatureCollection.fromFeatures(feats))
+}
+
+private fun updateDraftSources(style: Style, draft: ParkingDraft?) {
+    val path = draft?.path.orEmpty()
+    val feats = ArrayList<Feature>(3)
+    if (path.size >= 2) {
+        val line = LineString.fromLngLats(path.map { Point.fromLngLat(it.lng, it.lat) })
+        feats.add(
+            Feature.fromGeometry(line).apply { addStringProperty("side", "CENTER") }
+        )
+        if (draft?.stage == ParkingDraft.Stage.SIDE) {
+            for (side in Side.entries) {
+                feats.add(
+                    Feature.fromGeometry(line).apply {
+                        addStringProperty("side", side.name)
+                        // Both kerbs the same neutral colour: the question is which one, and a
+                        // colour difference before the answer would look like the answer.
+                        addStringProperty("color", "#78909C")
+                    }
+                )
+            }
+        }
+    }
+    style.getSourceAs<GeoJsonSource>(SRC_DRAFT)?.setGeoJson(FeatureCollection.fromFeatures(feats))
+    style.getSourceAs<GeoJsonSource>(SRC_DRAFT_PTS)?.setGeoJson(
+        FeatureCollection.fromFeatures(
+            path.map { Feature.fromGeometry(Point.fromLngLat(it.lng, it.lat)) }
         )
     )
 }

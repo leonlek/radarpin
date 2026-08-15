@@ -11,6 +11,8 @@ object Settings {
     private const val KEY_HEADING_UP = "heading_up"
     private const val KEY_DIRECTION_AWARE = "direction_aware"
     private const val KEY_AUTO_BOOT = "auto_start_boot"
+    private const val KEY_PARKING_LINES = "parking_lines"
+    private const val KEY_PARKING_REMIND = "parking_reminder"
     private const val KEY_ME_ICON = "me_icon"
     private const val KEY_BOOT_AT = "boot_last_at"
     private const val KEY_BOOT_ACTION = "boot_last_action"
@@ -45,6 +47,20 @@ object Settings {
 
     fun setDirectionAware(context: Context, value: Boolean) =
         prefs(context).edit().putBoolean(KEY_DIRECTION_AWARE, value).apply()
+
+    /** Draw the odd/even parking kerbs along the streets the driver has mapped. */
+    fun parkingLines(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_PARKING_LINES, true) // default ON
+
+    fun setParkingLines(context: Context, value: Boolean) =
+        prefs(context).edit().putBoolean(KEY_PARKING_LINES, value).apply()
+
+    /** Nudge before midnight when the car is parked on a kerb that swaps over. */
+    fun parkingReminder(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_PARKING_REMIND, true) // default ON
+
+    fun setParkingReminder(context: Context, value: Boolean) =
+        prefs(context).edit().putBoolean(KEY_PARKING_REMIND, value).apply()
 
     /** Open the app by itself when the head unit boots. */
     fun autoStartOnBoot(context: Context): Boolean =

@@ -31,6 +31,28 @@ object LocationBus {
     private val _dismissedIds = MutableStateFlow<Set<Long>>(emptySet())
     val dismissedIds: StateFlow<Set<Long>> = _dismissedIds
 
+    /**
+     * What the block the car has just parked on says about the kerb it is standing on. Set once,
+     * when the car settles — parking is a decision that is made once and then done, so this is not
+     * something to recompute per GPS tick — and cleared the moment it drives off again.
+     */
+    private val _parkedOn = MutableStateFlow<ParkedOn?>(null)
+    val parkedOn: StateFlow<ParkedOn?> = _parkedOn
+
+    /** [blockId] with the kerb the car is on and that kerb's verdict when it stopped. */
+    data class ParkedOn(
+        val blockId: Long,
+        val blockName: String,
+        val side: com.bydmapcam.data.Side,
+        val state: com.bydmapcam.parking.ParkingState,
+        /** True when this kerb is legal now but not after midnight. */
+        val flipsOvernight: Boolean
+    )
+
+    fun updateParkedOn(value: ParkedOn?) {
+        _parkedOn.value = value
+    }
+
     fun updateLocation(loc: Location) {
         _location.value = loc
     }
