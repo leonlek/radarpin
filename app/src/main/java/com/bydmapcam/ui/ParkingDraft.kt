@@ -15,6 +15,12 @@ import com.bydmapcam.parking.ParkingRules
  */
 data class ParkingDraft(
     val path: List<GeoPoint> = emptyList(),
+    /**
+     * How long the path was after each tap. One tap can now bring a whole curve of the road with
+     * it, and undo has to mean "that tap" — pressing it eight times to take back one touch would
+     * be a worse tool than the one that made you tap eight times in the first place.
+     */
+    val taps: List<Int> = emptyList(),
     val stage: Stage = Stage.PATH,
     /**
      * The block being re-traced, if this draft is a correction rather than a new block. Its rules
@@ -33,6 +39,20 @@ data class ParkingDraft(
 
     /** Two taps on the same spot draw a line with no sides to pick — don't let that step start. */
     val canAdvance: Boolean get() = path.size >= 2 && ParkingRules.pathLengthM(path) >= MIN_BLOCK_M
+
+    /** The path with [points] appended, remembered as one tap so undo can take them back together. */
+    fun plus(points: List<GeoPoint>): ParkingDraft {
+        if (points.isEmpty()) return this
+        val grown = path + points
+        return copy(path = grown, taps = taps + grown.size)
+    }
+
+    /** Back one tap — or, on a line loaded for re-tracing, back one of its original vertices. */
+    fun undo(): ParkingDraft {
+        if (path.isEmpty()) return this
+        val cut = if (taps.size >= 2) taps[taps.size - 2] else 0
+        return copy(path = path.take(cut), taps = taps.dropLast(1))
+    }
 
     private companion object {
         const val MIN_BLOCK_M = 10.0

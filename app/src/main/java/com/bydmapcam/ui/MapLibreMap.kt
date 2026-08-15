@@ -40,6 +40,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleEventObserver
 import com.bydmapcam.R
 import com.bydmapcam.data.AlertPoint
+import com.bydmapcam.data.GeoPoint
 import com.bydmapcam.data.ParkingBlock
 import com.bydmapcam.data.PointType
 import com.bydmapcam.data.Side
@@ -66,11 +67,13 @@ import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
+import org.maplibre.geojson.MultiLineString
 import org.maplibre.geojson.Point
 import org.maplibre.geojson.Polygon
 import kotlinx.coroutines.launch
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 // Free vector map, no API key required. See https://openfreemap.org
 // Fallback (raster OSM): build a Style from a raster source pointing at tile.openstreetmap.org.
@@ -155,8 +158,12 @@ fun MapLibreMap(
     parkingAt: Long = 0L,
     /** A block being drawn right now, drawn as a draft over the saved ones. */
     draft: ParkingDraft? = null,
-    /** Consumes a plain tap while drawing; true means "handled, don't treat it as a normal tap". */
-    onMapTap: (lat: Double, lng: Double) -> Boolean = { _, _ -> false },
+    /**
+     * Consumes a plain tap while drawing; true means "handled, don't treat it as a normal tap".
+     * [trace] is the stretch of road the tap landed on, read off the basemap and ending at the
+     * tapped spot — empty when nothing snapped, in which case the raw tap is all there is.
+     */
+    onMapTap: (tap: GeoPoint, trace: List<GeoPoint>) -> Boolean = { _, _ -> false },
     onParkingClick: (id: Long) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -168,6 +175,10 @@ fun MapLibreMap(
     val onMapLongClickNow by rememberUpdatedState(onMapLongClick)
     val onMapTapNow by rememberUpdatedState(onMapTap)
     val onParkingClickNow by rememberUpdatedState(onParkingClick)
+    val draftNow by rememberUpdatedState(draft)
+    // Filled once the style is up. Held as a State object, not a captured value, because the click
+    // listener is registered before the style has finished loading.
+    val roadLayers = remember { mutableStateOf<List<String>>(emptyList()) }
     val density = LocalDensity.current
     val navBarInsetPx = WindowInsets.navigationBars.getBottom(density)
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -232,8 +243,18 @@ fun MapLibreMap(
                 // layer and used to ignore taps entirely.
                 m.addOnMapClickListener { latLng ->
                     // While a block is being drawn every tap belongs to the drawing, including one
-                    // that lands on a marker — the map is a canvas for that stretch.
-                    if (onMapTapNow(latLng.latitude, latLng.longitude)) {
+                    // that lands on a marker — the map is a canvas for that stretch. The tap also
+                    // arrives with the stretch of road it landed on, traced off the basemap's own
+                    // geometry, so a bend needs no more taps than a straight.
+                    val tap = GeoPoint(latLng.latitude, latLng.longitude)
+                    val trace = roadTrace(
+                        map = m,
+                        layers = roadLayers.value,
+                        tap = latLng,
+                        from = draftNow?.path?.lastOrNull(),
+                        density = context.resources.displayMetrics.density
+                    )
+                    if (onMapTapNow(tap, trace)) {
                         return@addOnMapClickListener true
                     }
                     val screen = m.projection.toScreenLocation(latLng)
@@ -259,6 +280,7 @@ fun MapLibreMap(
                 m.setStyle(Style.Builder().fromUri(STYLE_URL)) { loaded ->
                     addMarkerImages(loaded, context)
                     setupLayers(loaded)
+                    roadLayers.value = roadLayerIds(loaded)
                     style = loaded
                 }
             }
@@ -682,6 +704,163 @@ private fun setupParkingLayers(style: Style) {
             PropertyFactory.circleStrokeColor(android.graphics.Color.parseColor("#1565C0"))
         )
     )
+}
+
+/**
+ * Every line layer in the basemap that draws a road, found by asking the style rather than by
+ * hard-coding names: this is an OpenMapTiles style, so roads live on the `transportation` source
+ * layer, and that is a fact about the schema rather than about one stylesheet's naming. Casings are
+ * skipped because they carry the same geometry as the line they sit under, and rails, footpaths and
+ * ferries because you can't park a car on them.
+ */
+private fun roadLayerIds(style: Style): List<String> =
+    style.layers.filterIsInstance<LineLayer>()
+        .filter { it.sourceLayer == "transportation" }
+        .map { it.id }
+        .filterNot { id ->
+            id.endsWith("_casing") || id.contains("rail") || id.contains("hatching") ||
+                id.contains("path_pedestrian") || id.contains("ferry")
+        }
+
+/** Classes that reach a tile through a road layer but are not a street a car parks on. */
+private val NON_ROAD_CLASSES = setOf("rail", "transit", "ferry", "path", "pedestrian", "bridleway")
+
+/** How far from the tap a road may be and still be what was meant. */
+private const val SNAP_MAX_M = 25.0
+
+/** Tap slop for the road query — wider than the marker slop; a road line is a thin thing to hit. */
+private const val SNAP_SLOP_DP = 28f
+
+/** Guards against a tap at the far end of a long road turning one block into a whole avenue. */
+private const val SNAP_MAX_RUN_M = 1200.0
+private const val SNAP_MAX_VERTICES = 80
+
+/** Where a position falls on a polyline: how far off it is, and how far along. */
+private data class OnLine(val distanceM: Double, val index: Int, val t: Double, val point: GeoPoint)
+
+/**
+ * The road under [tap], from [from] to the tap, taken from the basemap's own geometry.
+ *
+ * This is what makes a curved block two taps instead of ten: rather than the straight chord between
+ * them, the vertices of the road itself come along. It gives up and returns just the snapped point
+ * — or nothing at all — whenever the answer would be a guess: no road near the tap, the previous
+ * point on some other road, a tile boundary cutting the line short (the previous point then isn't
+ * on the piece we got back), or a run so long it can't be one block.
+ */
+private fun roadTrace(
+    map: MapLibreMap,
+    layers: List<String>,
+    tap: LatLng,
+    from: GeoPoint?,
+    density: Float
+): List<GeoPoint> {
+    if (layers.isEmpty()) return emptyList()
+    val screen = map.projection.toScreenLocation(tap)
+    val slop = SNAP_SLOP_DP * density
+    val box = RectF(screen.x - slop, screen.y - slop, screen.x + slop, screen.y + slop)
+    val lines = runCatching { map.queryRenderedFeatures(box, *layers.toTypedArray()) }
+        .getOrDefault(emptyList())
+        .filterNot { it.getStringProperty("class") in NON_ROAD_CLASSES }
+        .flatMap { linesOf(it) }
+        .filter { it.size >= 2 }
+    if (lines.isEmpty()) {
+        snapLog("no road under the tap (${layers.size} layers queried)")
+        return emptyList()
+    }
+
+    var bestLine: List<GeoPoint>? = null
+    var best: OnLine? = null
+    for (line in lines) {
+        val hit = nearestOnLine(line, tap.latitude, tap.longitude) ?: continue
+        if (best == null || hit.distanceM < best.distanceM) {
+            best = hit
+            bestLine = line
+        }
+    }
+    val to = best ?: return emptyList()
+    val line = bestLine ?: return emptyList()
+    if (to.distanceM > SNAP_MAX_M) {
+        snapLog("nearest road is ${to.distanceM.toInt()} m away — leaving the tap where it fell")
+        return emptyList()
+    }
+    if (from == null) {
+        snapLog("first point snapped ${to.distanceM.toInt()} m onto the road")
+        return listOf(to.point)
+    }
+
+    val start = nearestOnLine(line, from.lat, from.lng)
+    if (start == null || start.distanceM > SNAP_MAX_M) {
+        snapLog("previous point is not on this road — straight segment")
+        return listOf(to.point)
+    }
+
+    val forward = start.index < to.index || (start.index == to.index && start.t <= to.t)
+    val between = if (forward) {
+        line.subList((start.index + 1).coerceAtMost(line.size), (to.index + 1).coerceAtMost(line.size))
+    } else {
+        line.subList((to.index + 1).coerceAtMost(line.size), (start.index + 1).coerceAtMost(line.size))
+            .reversed()
+    }
+    if (between.size > SNAP_MAX_VERTICES) return listOf(to.point)
+    val run = ParkingRules.pathLengthM(listOf(from) + between + to.point)
+    if (run > SNAP_MAX_RUN_M) return listOf(to.point)
+    snapLog("followed road: +${between.size} vertices over ${run.toInt()} m")
+    return between + to.point
+}
+
+/**
+ * One line per tap about what the snapping decided. Cheap, quiet, and the only way to tell "the
+ * road was straight here" apart from "the snap never fired" — the two look identical on screen.
+ */
+private fun snapLog(message: String) {
+    android.util.Log.i("RadarPinSnap", message)
+}
+
+/** LineString / MultiLineString out of a queried feature, as plain points. */
+private fun linesOf(feature: Feature): List<List<GeoPoint>> =
+    when (val geometry = feature.geometry()) {
+        is LineString -> listOf(geometry.coordinates().map { GeoPoint(it.latitude(), it.longitude()) })
+        is MultiLineString -> geometry.coordinates().map { line ->
+            line.map { GeoPoint(it.latitude(), it.longitude()) }
+        }
+        else -> emptyList()
+    }
+
+/** Closest point on a polyline, in the same local-metre frame the kerb offsets use. */
+private fun nearestOnLine(line: List<GeoPoint>, lat: Double, lng: Double): OnLine? {
+    if (line.size < 2) return null
+    val cosLat = cos(Math.toRadians(lat))
+    fun x(p: GeoPoint) = (p.lng - lng) * 111_320.0 * cosLat
+    fun y(p: GeoPoint) = (p.lat - lat) * 110_540.0
+
+    var best: OnLine? = null
+    for (i in 0 until line.size - 1) {
+        val ax = x(line[i])
+        val ay = y(line[i])
+        val bx = x(line[i + 1])
+        val by = y(line[i + 1])
+        val abx = bx - ax
+        val aby = by - ay
+        val len2 = abx * abx + aby * aby
+        if (len2 == 0.0) continue
+        val t = ((-ax * abx) + (-ay * aby)) / len2
+        val clamped = t.coerceIn(0.0, 1.0)
+        val cx = ax + abx * clamped
+        val cy = ay + aby * clamped
+        val d = sqrt(cx * cx + cy * cy)
+        if (best == null || d < best.distanceM) {
+            best = OnLine(
+                distanceM = d,
+                index = i,
+                t = clamped,
+                point = GeoPoint(
+                    lat = line[i].lat + (line[i + 1].lat - line[i].lat) * clamped,
+                    lng = line[i].lng + (line[i + 1].lng - line[i].lng) * clamped
+                )
+            )
+        }
+    }
+    return best
 }
 
 /** Splits the two kerb symbol layers: the one you can park on today, and the one you can't. */

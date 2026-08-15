@@ -215,19 +215,20 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             },
             parkingAt = parkingAt,
             draft = draft,
-            onMapTap = { lat, lng ->
+            onMapTap = { tap, trace ->
                 val d = draft
                 if (d == null) {
                     false
                 } else {
                     when (d.stage) {
-                        // Tracing: each tap is another vertex of the block's centre line.
+                        // Tracing: the tap brings the road it landed on with it, so a bend arrives
+                        // already curved. Nothing snapped means the tap itself is the whole answer.
                         ParkingDraft.Stage.PATH ->
-                            draft = d.copy(path = d.path + GeoPoint(lat, lng))
+                            draft = d.plus(trace.ifEmpty { listOf(tap) })
                         // Picking the kerb: which side of the traced line the tap fell on IS the
                         // answer, so it works whether they hit the drawn kerb or the road beside it.
                         ParkingDraft.Stage.SIDE ->
-                            ParkingRules.nearestOnPath(d.path, lat, lng)?.side?.let { side ->
+                            ParkingRules.nearestOnPath(d.path, tap.lat, tap.lng)?.side?.let { side ->
                                 pendingBlock = PendingBlock(d.path, side, d.editing)
                             }
                     }
@@ -320,7 +321,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                     draft = d,
                     onUndo = {
                         draft = when (d.stage) {
-                            ParkingDraft.Stage.PATH -> d.copy(path = d.path.dropLast(1))
+                            ParkingDraft.Stage.PATH -> d.undo()
                             ParkingDraft.Stage.SIDE -> d.copy(stage = ParkingDraft.Stage.PATH)
                         }
                     },
@@ -538,7 +539,13 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 {
                     pendingBlock = null
                     selectedBlock = null
-                    draft = ParkingDraft(path = it.path, editing = it)
+                    // Each original vertex counts as its own tap, so undo walks the old line back
+                    // one point at a time — which is what "ถอย" meant before any of this.
+                    draft = ParkingDraft(
+                        path = it.path,
+                        taps = it.path.indices.map { i -> i + 1 },
+                        editing = it
+                    )
                 }
             },
             // Cancelling drops back to the map with the draft still there, so a mis-tapped kerb is

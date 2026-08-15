@@ -543,7 +543,7 @@ fun ParkingDrawBar(
                     ParkingDraft.Stage.PATH -> buildString {
                         if (editing != null) append("${editing.name} · ")
                         if (draft.path.isEmpty()) {
-                            append("ถนนตรงแตะแค่ 2 จุดก็พอ ถนนโค้งแตะเพิ่มได้")
+                            append("แตะหัวและท้ายบล็อก — ถนนโค้งจะยึดตามแนวถนนให้เอง")
                         } else {
                             append("${draft.path.size} จุด")
                             // The old line is still loaded, so say which button empties it.
