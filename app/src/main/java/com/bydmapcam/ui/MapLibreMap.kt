@@ -70,6 +70,7 @@ import org.maplibre.geojson.LineString
 import org.maplibre.geojson.MultiLineString
 import org.maplibre.geojson.Point
 import org.maplibre.geojson.Polygon
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.cos
 import kotlin.math.sin
@@ -125,7 +126,15 @@ private const val TAP_SLOP_DP = 26f
 private const val POP_SCALE_FROM = 1.15f
 /** Just enough overshoot to feel alive; more looks like the icon is wobbling. */
 private const val POP_DAMPING = 0.62f
-private const val POP_SCALE_TO = 2.0f
+/** How big it gets at the moment of opening — the part meant to be caught, not read. */
+private const val POP_SCALE_PEAK = 3.0f
+/** Where it settles once seen, and stays until the point is behind you. */
+private const val POP_SCALE_REST = 2.0f
+/** Long enough at the peak to register as an event; longer and it is just a big icon. */
+private const val POP_HOLD_MS = 800L
+private const val POP_SETTLE_MS = 420
+/** Label gap as a fraction of icon size — 1.2 em at the old fixed size of 2.0. */
+private const val POP_TEXT_OFFSET_PER_SCALE = 0.6f
 private const val POP_FADE_IN_MS = 180
 private const val POP_FADE_OUT_MS = 200
 private const val PING_MS = 700
@@ -189,7 +198,7 @@ fun MapLibreMap(
     // Camera follows the car until the user pans; the locate button re-enables it.
     var followMode by remember { mutableStateOf(true) }
     // Entrance animation state for the pop, plus which ids have already played it.
-    val popScale = remember { Animatable(POP_SCALE_TO) }
+    val popScale = remember { Animatable(POP_SCALE_REST) }
     val popFade = remember { Animatable(1f) }
     val pingProgress = remember { Animatable(1f) }
     val inForeground by AppState.inForeground.collectAsState()
@@ -358,14 +367,23 @@ fun MapLibreMap(
         popFade.snapTo(0f)
         popScale.snapTo(POP_SCALE_FROM)
         launch {
+            // Big first, then smaller: the size is what catches an eye that is on the road, and it
+            // only has to do that once. Holding the peak for a beat is what makes it register as a
+            // thing that happened rather than a flicker; settling back afterwards leaves the label
+            // readable without a permanently shouting icon in the corner of the driver's vision.
             popScale.animateTo(
-                POP_SCALE_TO,
+                POP_SCALE_PEAK,
                 spring(dampingRatio = POP_DAMPING, stiffness = Spring.StiffnessMediumLow)
             ) {
-                icon?.setProperties(PropertyFactory.iconSize(value))
+                icon?.setProperties(*popProperties(value))
             }
-            // Land exactly on the target even if the spring was interrupted.
-            icon?.setProperties(PropertyFactory.iconSize(POP_SCALE_TO))
+            icon?.setProperties(*popProperties(POP_SCALE_PEAK))
+            delay(POP_HOLD_MS)
+            popScale.animateTo(POP_SCALE_REST, tween(POP_SETTLE_MS, easing = FastOutSlowInEasing)) {
+                icon?.setProperties(*popProperties(value))
+            }
+            // Land exactly on the target even if the animation was interrupted.
+            icon?.setProperties(*popProperties(POP_SCALE_REST))
         }
         launch {
             popFade.animateTo(1f, tween(POP_FADE_IN_MS)) {
@@ -589,7 +607,7 @@ private fun setupLayers(style: Style) {
                 )
             ),
             PropertyFactory.iconAllowOverlap(true),
-            PropertyFactory.iconSize(2.0f),
+            PropertyFactory.iconSize(POP_SCALE_REST),
             PropertyFactory.textField(Expression.get("name")),
             PropertyFactory.textFont(arrayOf("Noto Sans Regular")),
             PropertyFactory.textSize(14f),
@@ -597,7 +615,7 @@ private fun setupLayers(style: Style) {
             PropertyFactory.textHaloColor(android.graphics.Color.WHITE),
             PropertyFactory.textHaloWidth(2f),
             PropertyFactory.textAnchor(Property.TEXT_ANCHOR_TOP),
-            PropertyFactory.textOffset(arrayOf(0f, 1.2f)),
+            PropertyFactory.textOffset(arrayOf(0f, POP_TEXT_OFFSET_PER_SCALE * POP_SCALE_REST)),
             PropertyFactory.textLineHeight(1.25f),
             PropertyFactory.textAllowOverlap(true)
         )
@@ -862,6 +880,18 @@ private fun nearestOnLine(line: List<GeoPoint>, lat: Double, lng: Double): OnLin
     }
     return best
 }
+
+/**
+ * The icon at [scale], with its label pushed down to match.
+ *
+ * `text-offset` is measured in ems of the label, not in icon heights, so a growing icon walks over
+ * its own name unless the offset grows with it — which is exactly what a three-times peak did the
+ * first time it was tried. The ratio is the one the settled size has always used.
+ */
+private fun popProperties(scale: Float) = arrayOf(
+    PropertyFactory.iconSize(scale),
+    PropertyFactory.textOffset(arrayOf(0f, POP_TEXT_OFFSET_PER_SCALE * scale))
+)
 
 /** Splits the two kerb symbol layers: the one you can park on today, and the one you can't. */
 private fun allowedFilter(allowed: Boolean): Expression {
