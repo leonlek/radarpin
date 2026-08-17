@@ -33,6 +33,15 @@ class BootReceiver : BroadcastReceiver() {
             return
         }
 
+        // Background-only by choice: on a head unit the screen usually belongs to the radio or a
+        // phone projection, and the warnings — beep, spoken name, card over other apps — need no
+        // window of ours at all. The service is the app as far as driving is concerned.
+        if (!Settings.autoStartShowApp(context)) {
+            runCatching { LocationService.start(context) }
+            Settings.recordBootTrace(context, action, Settings.BOOT_SERVICE_ONLY)
+            return
+        }
+
         // Android 10+ drops a background activity start without "display over other apps" — and it
         // drops it *silently*, no exception — so the permission we hold right now IS the outcome.
         val canShowWindow = Settings.canDrawOverlays(context)

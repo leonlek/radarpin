@@ -11,6 +11,7 @@ object Settings {
     private const val KEY_HEADING_UP = "heading_up"
     private const val KEY_DIRECTION_AWARE = "direction_aware"
     private const val KEY_AUTO_BOOT = "auto_start_boot"
+    private const val KEY_AUTO_SHOW_APP = "auto_start_show_app"
     private const val KEY_UPDATE_CHECK = "update_check"
     private const val KEY_UPDATE_AT = "update_checked_at"
     private const val KEY_PARKING_LINES = "parking_lines"
@@ -84,6 +85,18 @@ object Settings {
         prefs(context).edit().putBoolean(KEY_AUTO_BOOT, value).apply()
 
     /**
+     * Whether starting up also puts the app on screen. Off means the alert service runs and nothing
+     * else happens: beeps, the spoken warning and the card over other apps all still work, and the
+     * driver keeps whatever they had on the screen — which in a car is usually the radio or a phone
+     * projection, not us.
+     */
+    fun autoStartShowApp(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_AUTO_SHOW_APP, true) // default ON = what it always did
+
+    fun setAutoStartShowApp(context: Context, value: Boolean) =
+        prefs(context).edit().putBoolean(KEY_AUTO_SHOW_APP, value).apply()
+
+    /**
      * What the boot receiver saw the last time the head unit powered up. A car can't be watched
      * over adb, and every failure mode looks identical from the driver's seat ("the app didn't
      * open"), so the receiver leaves a trace: no trace at all means the screen never broadcast
@@ -100,6 +113,7 @@ object Settings {
 
     const val BOOT_OFF = "off"               // broadcast arrived, but the toggle was off
     const val BOOT_STARTED = "started"       // asked for the window while holding the overlay permission
+    const val BOOT_SERVICE_ONLY = "service"  // background-only by choice: the service, no window
     const val BOOT_NO_OVERLAY = "no_overlay" // asked without it — Android drops the start, silently
     const val BOOT_ERROR = "error"           // startActivity itself threw
 

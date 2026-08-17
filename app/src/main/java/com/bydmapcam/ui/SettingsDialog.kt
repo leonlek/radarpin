@@ -63,6 +63,7 @@ fun SettingsDialog(
     var autoBoot by remember { mutableStateOf(Settings.autoStartOnBoot(context)) }
     var parkingReminder by remember { mutableStateOf(Settings.parkingReminder(context)) }
     var updateCheck by remember { mutableStateOf(Settings.updateCheck(context)) }
+    var autoShowApp by remember { mutableStateOf(Settings.autoStartShowApp(context)) }
     val mediaAccess = MediaLink.hasAccess(context)
 
     AlertDialog(
@@ -201,6 +202,23 @@ fun SettingsDialog(
                     )
                 }
                 SettingRow(
+                    title = "แสดงหน้าแอปตอนเปิดเอง",
+                    subtitle = if (autoShowApp) {
+                        "เด้งหน้าแผนที่ขึ้นมาเต็มจอ"
+                    } else {
+                        "ทำงานเบื้องหลังอย่างเดียว — ยังบี๊บ พูด และเด้งการ์ดทับแอปอื่นครบ แต่ไม่แย่งจอ"
+                    }
+                ) {
+                    Switch(
+                        checked = autoShowApp,
+                        enabled = autoBoot,
+                        onCheckedChange = {
+                            autoShowApp = it
+                            Settings.setAutoStartShowApp(context, it)
+                        }
+                    )
+                }
+                SettingRow(
                     title = "บริการเฝ้าเตือน",
                     subtitle = aliveStatus(context)
                 ) {}
@@ -330,6 +348,7 @@ private fun bootStatus(context: Context): String {
     val tail = when (trace.result) {
         Settings.BOOT_OFF -> "ตอนนั้นสวิตช์ด้านบนปิดอยู่ จึงไม่ได้เปิดแอป"
         Settings.BOOT_STARTED -> "สั่งเปิดแอปแล้ว (มีสิทธิ์แสดงทับแอปอื่นครบ)"
+        Settings.BOOT_SERVICE_ONLY -> "สั่งให้ทำงานเบื้องหลัง ไม่แสดงหน้าแอป (ตามที่ตั้งไว้)"
         Settings.BOOT_NO_OVERLAY -> "สั่งเปิดแอปแล้ว แต่ยังไม่ได้สิทธิ์ \"แสดงทับแอปอื่น\" ระบบจึงบล็อกหน้าต่างไว้"
         else -> "สั่งเปิดแอปไม่สำเร็จ"
     }

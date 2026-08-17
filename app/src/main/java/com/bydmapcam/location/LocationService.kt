@@ -221,6 +221,13 @@ class LocationService : LifecycleService(), LocationListener {
      */
     private fun autoOpen(reason: String): Boolean {
         if (!Settings.autoStartOnBoot(this)) return false
+        // Running in the background is the whole point of these triggers when the driver has asked
+        // for no window: we are already here, alerting. Traced anyway — "did the car tell us it
+        // woke up" is still the question the settings screen has to answer.
+        if (!Settings.autoStartShowApp(this)) {
+            Settings.recordBootTrace(this, reason, Settings.BOOT_SERVICE_ONLY)
+            return false
+        }
         if (AppState.inForeground.value) return false
         val now = System.currentTimeMillis()
         if (now - lastWakeOpenAt < WAKE_DEBOUNCE_MS) return false
