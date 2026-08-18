@@ -23,7 +23,6 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = PointRepository(app)
     private val tripRepo = TripRepository(app)
     private val parkingRepo = ParkingRepository(app)
-
     val points: StateFlow<List<AlertPoint>> =
         repo.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 

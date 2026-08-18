@@ -145,6 +145,9 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     // at midnight always, and every minute for blocks that carry an hours ban.
     var parkingAt by remember { mutableStateOf(System.currentTimeMillis()) }
     val parkedOn by LocationBus.parkedOn.collectAsState()
+    val parkedSpot by LocationBus.parkedSpot.collectAsState()
+    // Waved away for this walk back; the next park writes a new spot and it returns.
+    var parkedCarDismissed by remember { mutableStateOf<Long?>(null) }
     // Waved away by value, so the next park — a different block, or the same one on another day —
     // brings the card back without needing a reset anywhere.
     var parkedNoticeDismissed by remember { mutableStateOf<LocationBus.ParkedOn?>(null) }
@@ -224,6 +227,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             },
             parkingAt = parkingAt,
             draft = draft,
+            parkedSpot = parkedSpot?.point,
             onMapTap = { tap, trace ->
                 val d = draft
                 if (d == null) {
@@ -308,6 +312,19 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                         painter = painterResource(R.drawable.ic_gear),
                         contentDescription = "ตั้งค่า",
                         tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+
+            parkedSpot?.takeIf { it.atMillis != parkedCarDismissed }?.let { spot ->
+                location?.let { here ->
+                    ParkedCarCard(
+                        spot = spot,
+                        currentLat = here.latitude,
+                        currentLng = here.longitude,
+                        onShowOnMap = { focus = spot.point.lat to spot.point.lng },
+                        onDismiss = { parkedCarDismissed = spot.atMillis },
+                        modifier = Modifier.padding(horizontal = 12.dp)
                     )
                 }
             }

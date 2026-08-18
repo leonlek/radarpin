@@ -53,6 +53,14 @@ object LocationBus {
         _parkedOn.value = value
     }
 
+    /** Where the car was left standing, for the walk back to it. */
+    private val _parkedSpot = MutableStateFlow<ParkedSpot.Spot?>(null)
+    val parkedSpot: StateFlow<ParkedSpot.Spot?> = _parkedSpot
+
+    fun updateParkedSpot(value: ParkedSpot.Spot?) {
+        _parkedSpot.value = value
+    }
+
     fun updateLocation(loc: Location) {
         _location.value = loc
     }

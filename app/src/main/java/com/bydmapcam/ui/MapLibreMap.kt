@@ -85,6 +85,7 @@ private const val SRC_CENTERS = "src-centers"
 private const val SRC_INFO = "src-info"
 private const val SRC_PING = "src-ping"
 private const val SRC_ME = "src-me"
+private const val SRC_PARKED_CAR = "src-parked-car"
 private const val SRC_PARKING = "src-parking"
 private const val SRC_PARKING_LABEL = "src-parking-label"
 private const val SRC_DRAFT = "src-draft"
@@ -167,6 +168,8 @@ fun MapLibreMap(
     parkingAt: Long = 0L,
     /** A block being drawn right now, drawn as a draft over the saved ones. */
     draft: ParkingDraft? = null,
+    /** Where the car was left standing, so the walk back has something to aim at. */
+    parkedSpot: GeoPoint? = null,
     /**
      * Consumes a plain tap while drawing; true means "handled, don't treat it as a normal tap".
      * [trace] is the stretch of road the tap landed on, read off the basemap and ending at the
@@ -310,6 +313,17 @@ fun MapLibreMap(
         val s = style ?: return@LaunchedEffect
         if (!inForeground) return@LaunchedEffect
         updateParkingSource(s, parkingBlocks, parkingAt)
+    }
+
+    // Where the car is parked. One feature that changes twice a day at most.
+    LaunchedEffect(parkedSpot, style) {
+        val s = style ?: return@LaunchedEffect
+        val feature = parkedSpot?.let {
+            Feature.fromGeometry(Point.fromLngLat(it.lng, it.lat))
+        }
+        s.getSourceAs<GeoJsonSource>(SRC_PARKED_CAR)?.setGeoJson(
+            FeatureCollection.fromFeatures(listOfNotNull(feature))
+        )
     }
 
     // The block being traced. Redrawn on every tap, but a draft is a handful of vertices and the
@@ -617,6 +631,27 @@ private fun setupLayers(style: Style) {
             PropertyFactory.textAnchor(Property.TEXT_ANCHOR_TOP),
             PropertyFactory.textOffset(arrayOf(0f, POP_TEXT_OFFSET_PER_SCALE * POP_SCALE_REST)),
             PropertyFactory.textLineHeight(1.25f),
+            PropertyFactory.textAllowOverlap(true)
+        )
+    )
+
+    // The parked car sits under the me-marker: when you are standing next to it the two overlap,
+    // and the one that has to be readable then is the one showing where *you* are.
+    style.addSource(GeoJsonSource(SRC_PARKED_CAR))
+    style.addLayer(
+        SymbolLayer("lyr-parked-car", SRC_PARKED_CAR).withProperties(
+            PropertyFactory.iconImage(MeIcon.SEDAN.imageId),
+            PropertyFactory.iconAllowOverlap(true),
+            PropertyFactory.iconSize(0.9f),
+            PropertyFactory.iconOpacity(0.85f),
+            PropertyFactory.textField("จอดไว้ที่นี่"),
+            PropertyFactory.textFont(arrayOf("Noto Sans Regular")),
+            PropertyFactory.textSize(11f),
+            PropertyFactory.textColor(android.graphics.Color.parseColor("#37474F")),
+            PropertyFactory.textHaloColor(android.graphics.Color.WHITE),
+            PropertyFactory.textHaloWidth(1.8f),
+            PropertyFactory.textAnchor(Property.TEXT_ANCHOR_TOP),
+            PropertyFactory.textOffset(arrayOf(0f, 1.1f)),
             PropertyFactory.textAllowOverlap(true)
         )
     )

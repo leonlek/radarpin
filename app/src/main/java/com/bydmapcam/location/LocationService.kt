@@ -145,6 +145,9 @@ class LocationService : LifecycleService(), LocationListener {
         // Start out parked if that's how we were left: otherwise re-opening the app while parked
         // inside a camera's radius beeps + banners all over again every single time.
         parked = getSharedPreferences(STATE_PREF, Context.MODE_PRIVATE).getBoolean(KEY_PARKED, false)
+        // Where the car was left is the one piece of state that matters most after a restart —
+        // that restart is often the app being opened again on the walk back to it.
+        LocationBus.updateParkedSpot(ParkedSpot.read(this))
 
         repository.observeAll()
             .onEach { points = it; recompute() }
@@ -446,7 +449,14 @@ class LocationService : LifecycleService(), LocationListener {
         parked = value
         getSharedPreferences(STATE_PREF, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_PARKED, value).apply()
-        if (!value) clearParkingState()
+        if (value) {
+            // The spot is written the moment the car settles, not when a door opens: by then the
+            // phone may already be out of the car and drifting away from where it actually stands.
+            lastLocation?.let { ParkedSpot.save(this, it.latitude, it.longitude) }
+        } else {
+            ParkedSpot.clear(this)
+            clearParkingState()
+        }
         // Standing still for minutes and then driving off is the car being used again, told by the
         // one signal that needs nothing from the head unit: the GPS. On a unit that neither boots
         // nor reports its screen, this is the only thing left that can bring the app back up.
