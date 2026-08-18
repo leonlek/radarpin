@@ -43,6 +43,8 @@ import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.data.ParkingBlock
 import com.bydmapcam.data.ParkingRepository
 import com.bydmapcam.data.PointRepository
+import com.bydmapcam.data.TrackCell
+import com.bydmapcam.data.TrackRepository
 import com.bydmapcam.data.PointType
 import com.bydmapcam.parking.ParkingAlarm
 import com.bydmapcam.parking.ParkingNotifier
@@ -64,6 +66,7 @@ class LocationService : LifecycleService(), LocationListener {
     private lateinit var displayManager: DisplayManager
     private lateinit var repository: PointRepository
     private lateinit var parkingRepository: ParkingRepository
+    private lateinit var trackRepository: TrackRepository
 
     @Volatile
     private var points: List<AlertPoint> = emptyList()
@@ -100,6 +103,10 @@ class LocationService : LifecycleService(), LocationListener {
     /** When each point last raised a warning, so a U-turn doesn't raise the same one twice.
      *  In memory only: the service outlives any single drive, and a restart is a fresh road. */
     private val lastAlertAt = mutableMapOf<Long, Long>()
+
+    /** The square painted last, so standing still doesn't hammer the database with the same one. */
+    private var lastCellY = Int.MIN_VALUE
+    private var lastCellX = Int.MIN_VALUE
 
     /** When the screen last went dark, 0 = it's on (or we never saw it go off). */
     private var screenOffAt = 0L
@@ -141,6 +148,7 @@ class LocationService : LifecycleService(), LocationListener {
         super.onCreate()
         repository = PointRepository(this)
         parkingRepository = ParkingRepository(this)
+        trackRepository = TrackRepository(this)
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         // Start out parked if that's how we were left: otherwise re-opening the app while parked
         // inside a camera's radius beeps + banners all over again every single time.
@@ -318,7 +326,27 @@ class LocationService : LifecycleService(), LocationListener {
     override fun onLocationChanged(location: Location) {
         lastLocation = location
         LocationBus.updateLocation(location)
+        recordTrack(location)
         recompute()
+    }
+
+    /**
+     * Paint the square the car is in, so the map fills itself in as it is driven.
+     *
+     * Only while genuinely moving and only from a fix worth trusting: a parked car with a wandering
+     * GPS would otherwise smear a blot over the neighbourhood it is standing in, and a 100 m fix
+     * would paint a road it was never on. The last square is remembered so a minute at a red light
+     * is one insert the database ignores, not sixty.
+     */
+    private fun recordTrack(location: Location) {
+        if (!location.hasSpeed() || location.speed < MOVING_SPEED_MPS) return
+        if (location.hasAccuracy() && location.accuracy > TRACK_MAX_ACCURACY_M) return
+        val y = TrackCell.cellYof(location.latitude)
+        val x = TrackCell.cellXof(location.latitude, location.longitude)
+        if (y == lastCellY && x == lastCellX) return
+        lastCellY = y
+        lastCellX = x
+        lifecycleScope.launch { trackRepository.record(location.latitude, location.longitude) }
     }
 
     /** Re-evaluate which points the car is inside. Runs on every GPS tick AND whenever the
@@ -768,6 +796,8 @@ class LocationService : LifecycleService(), LocationListener {
         private const val PARKED_AFTER_MS = 120_000L // stopped this long = parked -> mute alerts
         /** Closer than this to a block's centre line and the kerb the car is on is a coin toss. */
         private const val SIDE_MIN_M = 4f
+        /** A fix looser than this paints roads the car was never on. */
+        private const val TRACK_MAX_ACCURACY_M = 30f
         /** How old a fix may be and still be worth judging a parking spot by. */
         private const val FIX_FRESH_MS = 60_000L
         private const val STATE_PREF = "alert_state"

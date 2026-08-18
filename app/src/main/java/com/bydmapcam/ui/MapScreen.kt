@@ -137,6 +137,10 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     // Parking blocks: the kerb lines on the map, the block being drawn, and the one tapped open.
     val parkingBlocks by vm.parkingBlocks.collectAsState()
     var parkingLines by remember { mutableStateOf(Settings.parkingLines(context)) }
+    var showTrack by remember { mutableStateOf(Settings.showTrack(context)) }
+    val trackCells by vm.trackCells.collectAsState()
+    val coveredKm by vm.coveredKm.collectAsState()
+    LaunchedEffect(Unit) { vm.refreshCoverage() }
     var draft by remember { mutableStateOf<ParkingDraft?>(null) }
     var pendingBlock by remember { mutableStateOf<PendingBlock?>(null) }
     var selectedBlock by remember { mutableStateOf<ParkingBlock?>(null) }
@@ -228,6 +232,10 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             parkingAt = parkingAt,
             draft = draft,
             parkedSpot = parkedSpot?.point,
+            trackCells = if (showTrack) trackCells else emptyList(),
+            onViewportChanged = { minLat, maxLat, minLng, maxLng ->
+                if (showTrack) vm.loadTrack(minLat, maxLat, minLng, maxLng)
+            },
             onMapTap = { tap, trace ->
                 val d = draft
                 if (d == null) {
@@ -714,6 +722,14 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             onMeIconChange = { meIcon = it; Settings.setMeIcon(context, it) },
             parkingLines = parkingLines,
             onParkingLinesChange = { parkingLines = it; Settings.setParkingLines(context, it) },
+            showTrack = showTrack,
+            onShowTrackChange = {
+                showTrack = it
+                Settings.setShowTrack(context, it)
+                if (it) vm.refreshCoverage()
+            },
+            coveredKm = coveredKm,
+            onClearTrack = { vm.clearTrack() },
             onOpenTripHistory = { showSettings = false; showTripHistory = true },
             onCheckUpdate = {
                 showSettings = false

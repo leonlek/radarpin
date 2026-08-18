@@ -86,6 +86,7 @@ private const val SRC_INFO = "src-info"
 private const val SRC_PING = "src-ping"
 private const val SRC_ME = "src-me"
 private const val SRC_PARKED_CAR = "src-parked-car"
+private const val SRC_TRACK = "src-track"
 private const val SRC_PARKING = "src-parking"
 private const val SRC_PARKING_LABEL = "src-parking-label"
 private const val SRC_DRAFT = "src-draft"
@@ -170,6 +171,10 @@ fun MapLibreMap(
     draft: ParkingDraft? = null,
     /** Where the car was left standing, so the walk back has something to aim at. */
     parkedSpot: GeoPoint? = null,
+    /** Centres of the squares this car has driven through, for the part of the map on screen. */
+    trackCells: List<GeoPoint> = emptyList(),
+    /** Fires when the camera settles, with the region now visible — the track is fetched per view. */
+    onViewportChanged: (minLat: Double, maxLat: Double, minLng: Double, maxLng: Double) -> Unit = { _, _, _, _ -> },
     /**
      * Consumes a plain tap while drawing; true means "handled, don't treat it as a normal tap".
      * [trace] is the stretch of road the tap landed on, read off the basemap and ending at the
@@ -187,6 +192,7 @@ fun MapLibreMap(
     val onMapLongClickNow by rememberUpdatedState(onMapLongClick)
     val onMapTapNow by rememberUpdatedState(onMapTap)
     val onParkingClickNow by rememberUpdatedState(onParkingClick)
+    val onViewportChangedNow by rememberUpdatedState(onViewportChanged)
     val draftNow by rememberUpdatedState(draft)
     // Filled once the style is up. Held as a State object, not a captured value, because the click
     // listener is registered before the style has finished loading.
@@ -241,8 +247,13 @@ fun MapLibreMap(
                 }
                 // Publish the visible region so the offline downloader can grab "what's on screen".
                 m.addOnCameraIdleListener {
-                    MapCamera.bounds = m.projection.visibleRegion.latLngBounds
+                    val bounds = m.projection.visibleRegion.latLngBounds
+                    MapCamera.bounds = bounds
                     MapCamera.zoom = m.cameraPosition.zoom
+                    onViewportChangedNow(
+                        bounds.latitudeSouth, bounds.latitudeNorth,
+                        bounds.longitudeWest, bounds.longitudeEast
+                    )
                 }
                 // Long-press anywhere to add a point at that map location.
                 m.addOnMapLongClickListener { latLng ->
@@ -313,6 +324,18 @@ fun MapLibreMap(
         val s = style ?: return@LaunchedEffect
         if (!inForeground) return@LaunchedEffect
         updateParkingSource(s, parkingBlocks, parkingAt)
+    }
+
+    // The trail of squares already driven. Rebuilt when the view moves, which is the only time the
+    // answer can change — a fix inside a square already painted changes nothing.
+    LaunchedEffect(trackCells, style, inForeground) {
+        val s = style ?: return@LaunchedEffect
+        if (!inForeground) return@LaunchedEffect
+        s.getSourceAs<GeoJsonSource>(SRC_TRACK)?.setGeoJson(
+            FeatureCollection.fromFeatures(
+                trackCells.map { Feature.fromGeometry(Point.fromLngLat(it.lng, it.lat)) }
+            )
+        )
     }
 
     // Where the car is parked. One feature that changes twice a day at most.
@@ -546,6 +569,27 @@ private fun alertColorByType(): Expression = Expression.match(
 private fun colorHex(argb: Long): String = "#%06X".format(argb and 0xFFFFFF)
 
 private fun setupLayers(style: Style) {
+    // Roads already driven, painted underneath everything else: it is scenery, not information to
+    // be read, and it must never sit on top of a warning. The dots are sized in real metres (they
+    // double per zoom level) so neighbouring squares always overlap into a continuous trail rather
+    // than becoming a dotted line at some zooms and a blob at others.
+    style.addSource(GeoJsonSource(SRC_TRACK))
+    style.addLayer(
+        CircleLayer("lyr-track", SRC_TRACK).withProperties(
+            PropertyFactory.circleColor(android.graphics.Color.parseColor("#FF8F00")),
+            PropertyFactory.circleOpacity(0.28f),
+            PropertyFactory.circleRadius(
+                Expression.interpolate(
+                    Expression.exponential(2f), Expression.zoom(),
+                    // ~26 m across at any zoom: wide enough that diagonal neighbours close up
+                    // into one band, narrow enough that the band still reads as a road.
+                    Expression.stop(11f, 1.2f),
+                    Expression.stop(20f, 307f)
+                )
+            )
+        )
+    )
+
     // Parking kerbs go in first so every marker, ring and label stays on top of them: they are
     // information about the street itself, not something that competes with a warning.
     setupParkingLayers(style)

@@ -9,8 +9,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [AlertPoint::class, Trip::class, ParkingBlock::class],
-    version = 7,
+    entities = [AlertPoint::class, Trip::class, ParkingBlock::class, TrackCell::class],
+    version = 8,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -18,6 +18,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun alertPointDao(): AlertPointDao
     abstract fun tripDao(): TripDao
     abstract fun parkingBlockDao(): ParkingBlockDao
+    abstract fun trackDao(): TrackDao
 
     companion object {
         @Volatile
@@ -84,6 +85,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // The grid of squares this car has driven through. The pair of coordinates is the
+                // key, which is what makes re-driving a road free in both storage and work.
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS track_cells (" +
+                        "cellY INTEGER NOT NULL, " +
+                        "cellX INTEGER NOT NULL, " +
+                        "firstSeenAt INTEGER NOT NULL, " +
+                        "PRIMARY KEY(cellY, cellX))"
+                )
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -92,7 +107,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "byd-map-cam.db"
                 ).addMigrations(
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
-                    MIGRATION_6_7
+                    MIGRATION_6_7, MIGRATION_7_8
                 )
                     .build().also { INSTANCE = it }
             }

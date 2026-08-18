@@ -15,6 +15,7 @@ object Settings {
     private const val KEY_UPDATE_CHECK = "update_check"
     private const val KEY_UPDATE_AT = "update_checked_at"
     private const val KEY_PARKING_LINES = "parking_lines"
+    private const val KEY_SHOW_TRACK = "show_track"
     private const val KEY_PARKING_REMIND = "parking_reminder"
     private const val KEY_ME_ICON = "me_icon"
     private const val KEY_BOOT_AT = "boot_last_at"
@@ -57,6 +58,13 @@ object Settings {
 
     fun setParkingLines(context: Context, value: Boolean) =
         prefs(context).edit().putBoolean(KEY_PARKING_LINES, value).apply()
+
+    /** Paint the squares this car has driven through over the map. */
+    fun showTrack(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_SHOW_TRACK, true) // default ON
+
+    fun setShowTrack(context: Context, value: Boolean) =
+        prefs(context).edit().putBoolean(KEY_SHOW_TRACK, value).apply()
 
     /** Nudge before midnight when the car is parked on a kerb that swaps over. */
     fun parkingReminder(context: Context): Boolean =

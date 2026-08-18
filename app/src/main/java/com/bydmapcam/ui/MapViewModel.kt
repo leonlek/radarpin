@@ -7,14 +7,18 @@ import com.bydmapcam.data.AlertPoint
 import com.bydmapcam.data.CameraImport
 import com.bydmapcam.data.ParkingBlock
 import com.bydmapcam.data.ParkingRepository
+import com.bydmapcam.data.GeoPoint
 import com.bydmapcam.data.PointRepository
+import com.bydmapcam.data.TrackRepository
 import com.bydmapcam.data.PointType
 import com.bydmapcam.data.Trip
 import com.bydmapcam.data.TripRepository
 import com.bydmapcam.trip.TripTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -23,6 +27,35 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = PointRepository(app)
     private val tripRepo = TripRepository(app)
     private val parkingRepo = ParkingRepository(app)
+    private val trackRepo = TrackRepository(app)
+
+    private val _trackCells = MutableStateFlow<List<GeoPoint>>(emptyList())
+
+    /** The driven squares inside the current view — fetched per viewport, never all at once. */
+    val trackCells: StateFlow<List<GeoPoint>> = _trackCells.asStateFlow()
+
+    private val _coveredKm = MutableStateFlow(0.0)
+    val coveredKm: StateFlow<Double> = _coveredKm.asStateFlow()
+
+    fun loadTrack(minLat: Double, maxLat: Double, minLng: Double, maxLng: Double) {
+        viewModelScope.launch {
+            _trackCells.value = trackRepo.inBounds(minLat, maxLat, minLng, maxLng)
+        }
+    }
+
+    fun refreshCoverage() {
+        viewModelScope.launch { _coveredKm.value = trackRepo.coveredKm() }
+    }
+
+    /** Wipes the trail — the one destructive thing in here, so it is never called by accident. */
+    fun clearTrack() {
+        viewModelScope.launch {
+            trackRepo.clear()
+            _trackCells.value = emptyList()
+            _coveredKm.value = 0.0
+        }
+    }
+
     val points: StateFlow<List<AlertPoint>> =
         repo.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 

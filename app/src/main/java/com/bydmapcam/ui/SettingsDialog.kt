@@ -50,6 +50,10 @@ fun SettingsDialog(
     onMeIconChange: (MeIcon) -> Unit,
     parkingLines: Boolean,
     onParkingLinesChange: (Boolean) -> Unit,
+    showTrack: Boolean,
+    onShowTrackChange: (Boolean) -> Unit,
+    coveredKm: Double,
+    onClearTrack: () -> Unit,
     onImportCameras: () -> Unit,
     onOpenOffline: () -> Unit,
     onOpenTripHistory: () -> Unit,
@@ -170,6 +174,24 @@ fun SettingsDialog(
                     )
                 }
                 HorizontalDivider()
+                SettingRow(
+                    title = "ระบายถนนที่เคยขับ",
+                    subtitle = if (coveredKm > 0) {
+                        "เปิดแผนที่ไปแล้ว %.1f กม. — ถนนที่เคยผ่านจะถูกระบายไว้".format(coveredKm)
+                    } else {
+                        "ขับผ่านที่ไหน ที่นั่นจะถูกระบายไว้บนแผนที่"
+                    }
+                ) {
+                    Switch(checked = showTrack, onCheckedChange = onShowTrackChange)
+                }
+                if (showTrack && coveredKm > 0) {
+                    SettingRow(
+                        title = "ล้างรอยที่ระบายไว้",
+                        subtitle = "ลบทั้งหมด เริ่มเปิดแผนที่ใหม่ตั้งแต่ต้น"
+                    ) {
+                        TextButton(onClick = onClearTrack) { Text("ล้าง") }
+                    }
+                }
                 SettingRow(
                     title = "แสดงเส้นที่จอดรถ",
                     subtitle = "ระบายขอบถนนที่บันทึกไว้ — เขียว = วันนี้จอดฝั่งนี้ได้ แดง = ห้าม (เห็นตอนซูมเข้า)"
