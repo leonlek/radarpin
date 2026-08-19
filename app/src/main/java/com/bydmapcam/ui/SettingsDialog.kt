@@ -177,9 +177,9 @@ fun SettingsDialog(
                 SettingRow(
                     title = "ระบายถนนที่เคยขับ",
                     subtitle = if (coveredKm > 0) {
-                        "เปิดแผนที่ไปแล้ว %.1f กม. — ถนนที่เคยผ่านจะถูกระบายไว้".format(coveredKm)
+                        "เปิดแผนที่ไปแล้ว %.1f กม. — เก็บเฉพาะตอนเปิดทริป".format(coveredKm)
                     } else {
-                        "ขับผ่านที่ไหน ที่นั่นจะถูกระบายไว้บนแผนที่"
+                        "เปิดทริปแล้วขับ ถนนที่ผ่านจะถูกระบายไว้บนแผนที่"
                     }
                 ) {
                     Switch(checked = showTrack, onCheckedChange = onShowTrackChange)

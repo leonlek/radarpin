@@ -51,6 +51,7 @@ import com.bydmapcam.parking.ParkingNotifier
 import com.bydmapcam.parking.ParkingRules
 import com.bydmapcam.parking.ParkingState
 import com.bydmapcam.settings.Settings
+import com.bydmapcam.trip.TripTracker
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -333,12 +334,17 @@ class LocationService : LifecycleService(), LocationListener {
     /**
      * Paint the square the car is in, so the map fills itself in as it is driven.
      *
-     * Only while genuinely moving and only from a fix worth trusting: a parked car with a wandering
-     * GPS would otherwise smear a blot over the neighbourhood it is standing in, and a 100 m fix
-     * would paint a road it was never on. The last square is remembered so a minute at a red light
-     * is one insert the database ignores, not sixty.
+     * Only while a trip is running, only while genuinely moving, and only from a fix worth
+     * trusting: a parked car with a wandering GPS would otherwise smear a blot over the
+     * neighbourhood it is standing in, and a 100 m fix would paint a road it was never on. The last
+     * square is remembered so a minute at a red light is one insert the database ignores, not sixty.
      */
     private fun recordTrack(location: Location) {
+        // Only while a trip is open. Painting the map is something the driver opts into for a
+        // journey rather than a log that runs whenever the engine does: the trip button is already
+        // the place where "this drive counts" is said, and a record of everywhere a car has ever
+        // been should not accumulate by default.
+        if (TripTracker.active.value == null) return
         if (!location.hasSpeed() || location.speed < MOVING_SPEED_MPS) return
         if (location.hasAccuracy() && location.accuracy > TRACK_MAX_ACCURACY_M) return
         val y = TrackCell.cellYof(location.latitude)
